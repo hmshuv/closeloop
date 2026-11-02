@@ -5,8 +5,18 @@ import { stage2Fuzzy } from "./stage2-fuzzy.ts";
 import { newBankState, suggestedSettlementIds } from "./stage2-state.ts";
 import type { SourceData, StageResult } from "./types.ts";
 
+/** A settlement that could belong to an open AMBIGUOUS_BATCH / MATCH_CONFLICT: its fate waits on a human. */
+export interface DeferredSettlement {
+  settlement_id: string;
+  settled_at: string;
+  amount_paise: number;
+  /** Primary bank lines of the open batch exceptions it could belong to. */
+  bank_line_ids: string[];
+}
+
 export interface Stage2Result extends StageResult {
   batch: BatchStats;
+  deferred: DeferredSettlement[];
 }
 
 /** Stage 2: settlement ↔ bank credit. Order: exact UTR → fuzzy UTR → batch decomposition. */
@@ -22,6 +32,7 @@ export function stage2Bank(src: SourceData, cfg: CloseLoopConfig, now?: () => nu
     matches: [...exact.matches, ...fuzzy.matches, ...batch.matches],
     exceptions: [...exact.exceptions, ...fuzzy.exceptions, ...batch.exceptions],
     batch: batch.stats,
+    deferred: [],
   };
 
   const underReview = new Set(batch.exceptions.map((e) => e.primary.id));
@@ -45,7 +56,14 @@ export function stage2Bank(src: SourceData, cfg: CloseLoopConfig, now?: () => nu
 
   const pendingReview = suggestedSettlementIds(state);
   for (const s of state.settlements) {
-    if (state.linked.has(s.id) || pendingReview.has(s.id) || batch.reserved.has(s.id) || s.settled_at > src.asOf) continue;
+    if (state.linked.has(s.id) || pendingReview.has(s.id)) continue;
+    const holders = batch.reserved.get(s.id);
+    if (holders) {
+      // Status unresolved_in_batch: re-evaluated when a candidate set is approved (see review/batch.ts).
+      result.deferred.push({ settlement_id: s.id, settled_at: s.settled_at, amount_paise: s.amount_paise, bank_line_ids: [...new Set(holders)] });
+      continue;
+    }
+    if (s.settled_at > src.asOf) continue;
     result.exceptions.push({
       type: "MISSING_BANK_CREDIT",
       amount_paise: s.amount_paise,

@@ -35,6 +35,8 @@ export const MatchingConfigSchema = z.object({
     mitm_max_n: z.number().int().positive().max(40),
     max_candidate_sets: z.number().int().positive(),
     max_passes: z.number().int().positive(),
+    /** A one-settlement "batch" auto-matches only if the narration names the gateway (case-insensitive substring). */
+    single_settlement_gateway_patterns: z.array(z.string().min(2)),
   }),
   amount_mismatch_rounding_threshold_paise: PaiseSchema.nonnegative(),
   fuzzy: z.object({

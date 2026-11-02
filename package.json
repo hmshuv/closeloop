@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gen": "tsx scripts/gen.ts",
-    "recon": "tsx scripts/recon.ts"
+    "recon": "tsx scripts/recon.ts",
+    "demo:cases": "tsx scripts/demo-cases.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -25,6 +26,7 @@
     "vitest": "^5.0.5"
   },
   "dependencies": {
-    "@closeloop/core": "workspace:*"
+    "@closeloop/core": "workspace:*",
+    "zod": "^3.25.76"
   }
 }

@@ -1,7 +1,7 @@
 import type { CloseLoopConfig } from "../config.ts";
 import { exposureClassOf } from "./exposure.ts";
 import { stage1Items } from "./stage1-items.ts";
-import { stage2Bank } from "./stage2-bank.ts";
+import { stage2Bank, type DeferredSettlement } from "./stage2-bank.ts";
 import type { BatchStats } from "./stage2-batch.ts";
 import { stage3Ledger } from "./stage3-ledger.ts";
 import { stage4Timing } from "./stage4-timing.ts";
@@ -14,6 +14,8 @@ export interface ReconResult {
   matches: MatchDraft[];
   exceptions: ClassifiedException[];
   pending: { payments_in_window: number; receipts_in_grace: number };
+  /** Possible members of open batch exceptions (status unresolved_in_batch). */
+  deferred: DeferredSettlement[];
   tieOut: TieOut;
   batch: BatchStats;
   durationMs: number;
@@ -38,6 +40,7 @@ export function reconcile(src: SourceData, cfg: CloseLoopConfig, period: { from:
     matches: [...s1.matches, ...s2.matches, ...s3.matches],
     exceptions,
     pending: { payments_in_window: s1.pendingInWindow, receipts_in_grace: s3.pendingReceipts },
+    deferred: s2.deferred,
     tieOut,
     batch: s2.batch,
     durationMs: performance.now() - started,

@@ -11,6 +11,9 @@ importers:
       '@closeloop/core':
         specifier: workspace:*
         version: link:packages/core
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1

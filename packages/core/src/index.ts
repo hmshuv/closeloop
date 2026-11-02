@@ -17,4 +17,5 @@ export { EXPOSURE_BY_TYPE, exposureClassOf, summarizeExposure, type ExposureSumm
 export { findSubsetsWithSum, type SubsetSumResult, type SubsetSumOptions } from "./matcher/subsetsum.ts";
 export { computeTieOut, type TieOut } from "./matcher/tieout.ts";
 export * from "./matcher/types.ts";
+export { approveBatchCandidate, type ApproveBatchResult, type LeftoverOutcome } from "./review/batch.ts";
 // Ground-truth readers are deliberately NOT exported here; eval imports them from "@closeloop/core/truth".

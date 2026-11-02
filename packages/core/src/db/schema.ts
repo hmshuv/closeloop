@@ -135,6 +135,17 @@ CREATE TABLE IF NOT EXISTS batch_candidate_sets (
   PRIMARY KEY (exception_id, set_index)
 ) STRICT;
 
+/* Settlements deferred to a human batch decision, and what became of them. */
+CREATE TABLE IF NOT EXISTS settlement_reviews (
+  run_id                   TEXT NOT NULL REFERENCES recon_runs(id),
+  settlement_id            TEXT NOT NULL,
+  exception_id             TEXT NOT NULL REFERENCES exceptions(id),
+  status                   TEXT NOT NULL CHECK (status IN ('unresolved_in_batch','assigned','missing_raised','released')),
+  resolved_by_exception_id TEXT,
+  updated_at               TEXT NOT NULL,
+  PRIMARY KEY (run_id, settlement_id, exception_id)
+) STRICT;
+
 CREATE INDEX IF NOT EXISTS idx_matches_run ON matches(run_id);
 CREATE INDEX IF NOT EXISTS idx_matches_left ON matches(left_id);
 CREATE INDEX IF NOT EXISTS idx_matches_right ON matches(right_id);

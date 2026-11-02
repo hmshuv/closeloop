@@ -5,7 +5,12 @@
     "node_budget": 5000000,
     "mitm_max_n": 36,
     "max_candidate_sets": 5,
-    "max_passes": 4
+    "max_passes": 4,
+    "single_settlement_gateway_patterns": [
+      "RAZORPAY",
+      "RZPY",
+      "RZP"
+    ]
   },
   "amount_mismatch_rounding_threshold_paise": 100,
   "fuzzy": {

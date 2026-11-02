@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CloseLoopConfig } from "../config.ts";
 import type { Db } from "../db/open.ts";
-import { EXCEPTION_TYPES, ExceptionTypeSchema, IsoDateSchema, type ExceptionType } from "../types.ts";
+import { EXCEPTION_TYPES, IsoDateSchema, type ExceptionType } from "../types.ts";
 import { summarizeExposure } from "./exposure.ts";
 import { datasetMeta, loadSource } from "./load.ts";
 import { reconcile, type ReconResult } from "./reconcile.ts";
@@ -26,8 +26,13 @@ export const ReconSummarySchema = z.object({
     ledger_by_attributes: z.number().int(),
     journals: z.number().int(),
   }),
-  pending: z.object({ payments_in_window: z.number().int(), receipts_in_grace: z.number().int() }),
-  exceptions_by_type: z.record(ExceptionTypeSchema, Counted),
+  pending: z.object({
+    payments_in_window: z.number().int(),
+    receipts_in_grace: z.number().int(),
+    /** Settlements whose bank credit depends on an open AMBIGUOUS_BATCH / MATCH_CONFLICT decision. */
+    unresolved_in_batch: z.number().int(),
+  }),
+  exceptions_by_type: z.object(Object.fromEntries(EXCEPTION_TYPES.map((t) => [t, Counted])) as Record<ExceptionType, typeof Counted>),
   /** Never summed across classes. */
   exposure_by_class: z.object(Object.fromEntries(EXPOSURE_CLASSES.map((c) => [c, Counted])) as Record<(typeof EXPOSURE_CLASSES)[number], typeof Counted>),
   tie_out: z.object({
@@ -44,6 +49,7 @@ export const ReconSummarySchema = z.object({
     decomposed: z.number().int(),
     ambiguous: z.number().int(),
     conflicts: z.number().int(),
+    single_settlement_suggested: z.number().int(),
     none: z.number().int(),
     budget_exhausted: z.number().int(),
     max_pool: z.number().int(),
@@ -81,7 +87,7 @@ export function summarize(runId: string, result: ReconResult, from: string, to: 
       ledger_by_attributes: kinds.LEDGER_ATTR.size,
       journals: kinds.JOURNAL.size,
     },
-    pending: result.pending,
+    pending: { ...result.pending, unresolved_in_batch: result.deferred.filter((d) => inPeriod(d.settled_at)).length },
     exceptions_by_type: byType,
     exposure_by_class: summarizeExposure(exceptions),
     tie_out: {
@@ -97,6 +103,7 @@ export function summarize(runId: string, result: ReconResult, from: string, to: 
       decomposed: result.batch.decomposed,
       ambiguous: result.batch.ambiguous,
       conflicts: result.batch.conflicts,
+      single_settlement_suggested: result.batch.single_settlement_suggested,
       none: result.batch.none,
       budget_exhausted: result.batch.budget_exhausted,
       max_pool: result.batch.max_pool,
@@ -144,16 +151,28 @@ export function runReconciliation(db: Db, cfg: CloseLoopConfig, opts: RunOptions
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
   );
   const insertSet = db.prepare("INSERT INTO batch_candidate_sets (exception_id, set_index, settlement_ids_json) VALUES (?, ?, ?)");
+  const insertReview = db.prepare(
+    "INSERT INTO settlement_reviews (run_id, settlement_id, exception_id, status, updated_at) VALUES (?, ?, ?, 'unresolved_in_batch', ?)",
+  );
 
   db.transaction(() => {
     insertRun.run(runId, from, to, to, startedAt, new Date().toISOString(), configHash(cfg), JSON.stringify(summary));
     for (const m of result.matches) {
       insertMatch.run(randomUUID(), runId, m.kind, m.left.type, m.left.id, m.right.type, m.right.id, m.confidence, m.reason, m.anchor_date, JSON.stringify(m.trace));
     }
+    const batchExceptionOf = new Map<string, string>();
     for (const e of result.exceptions) {
       const id = randomUUID();
+      if (e.type === "AMBIGUOUS_BATCH" || e.type === "MATCH_CONFLICT") batchExceptionOf.set(e.primary.id, id);
       insertException.run(id, runId, e.type, e.exposure_class, e.amount_paise, e.subtype ?? null, e.primary.type, e.primary.id, e.anchor_date, JSON.stringify(e.related), JSON.stringify(e.trace));
       e.candidate_sets?.forEach((set, i) => insertSet.run(id, i, JSON.stringify(set)));
+    }
+    const at = new Date().toISOString();
+    for (const d of result.deferred) {
+      for (const line of d.bank_line_ids) {
+        const exceptionId = batchExceptionOf.get(line);
+        if (exceptionId) insertReview.run(runId, d.settlement_id, exceptionId, at);
+      }
     }
   })();
   return { summary, result };

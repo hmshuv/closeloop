@@ -15,6 +15,7 @@ export interface BatchStats {
   settlements_decomposed: number;
   ambiguous: number;
   conflicts: number;
+  single_settlement_suggested: number;
   none: number;
   budget_exhausted: number;
   max_pool: number;
@@ -31,8 +32,11 @@ export interface BatchOutcome {
 
 export interface Stage2BatchResult extends StageResult {
   stats: BatchStats;
-  /** Settlements that could belong to an open AMBIGUOUS_BATCH / MATCH_CONFLICT; never also reported missing. */
-  reserved: Set<string>;
+  /**
+   * Settlements that could belong to an open AMBIGUOUS_BATCH / MATCH_CONFLICT → the bank line(s) of those exceptions.
+   * They are deferred to the human decision (status unresolved_in_batch), never silently dropped or called missing.
+   */
+  reserved: Map<string, string[]>;
   /** Credits searched and proven to have no decomposition. */
   unresolved: Map<string, BatchOutcome>;
 }
@@ -72,9 +76,9 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
   const result: Stage2BatchResult = {
     matches: [],
     exceptions: [],
-    reserved: new Set(),
+    reserved: new Map(),
     unresolved: new Map(),
-    stats: { attempted: 0, contiguous_decomposed: 0, decomposed: 0, settlements_decomposed: 0, ambiguous: 0, conflicts: 0, none: 0, budget_exhausted: 0, max_pool: 0, mitm_runs: 0, dfs_runs: 0, total_ms: 0 },
+    stats: { attempted: 0, contiguous_decomposed: 0, decomposed: 0, settlements_decomposed: 0, ambiguous: 0, conflicts: 0, single_settlement_suggested: 0, none: 0, budget_exhausted: 0, max_pool: 0, mitm_runs: 0, dfs_runs: 0, total_ms: 0 },
   };
   const suggested = suggestedSettlementIds(state);
   const suggestingLines = (settlementId: string) => [...state.suggestions].filter(([, ids]) => ids.includes(settlementId)).map(([line]) => line);
@@ -82,13 +86,49 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
   const poolFor = (line: BankLine) =>
     settlementsBetween(state, windowStart(line.txn_date, b.window_business_days, cal), line.txn_date).filter((s) => !state.linked.has(s.id) && s.amount_paise > 0);
   const conflicts = new Map<string, { line: BankLine; members: Settlement[]; conflicting: Settlement[]; method: string }>();
+  const reserve = (settlementId: string, lineId: string) => result.reserved.set(settlementId, [...(result.reserved.get(settlementId) ?? []), lineId]);
+
+  /** An amount-only match to one settlement needs human approval unless the evidence is strong (see accept). */
+  const suggest = (line: BankLine, s: Settlement, trace: Record<string, unknown> & { rule: string }) => {
+    state.suggestions.set(line.id, [s.id]);
+    suggested.add(s.id);
+    result.stats.single_settlement_suggested++;
+    result.exceptions.push({
+      type: "SUGGESTED_MATCH",
+      amount_paise: line.credit_paise,
+      primary: { type: "bank_line", id: line.id },
+      anchor_date: line.txn_date,
+      related: [{ type: "settlement", id: s.id }],
+      trace: { ...trace, suggested: { settlement_id: s.id, utr: s.utr, amount_equal: true } },
+    });
+  };
 
   /** Returns true if the credit was consumed (matched). Conflicts are recorded and not retried. */
-  const accept = (line: BankLine, members: Settlement[], kind: "BATCH_CONTIGUOUS" | "BATCH", trace: Record<string, unknown>): boolean => {
+  const accept = (line: BankLine, members: Settlement[], kind: "BATCH_CONTIGUOUS" | "BATCH", trace: Record<string, unknown> & { rule: string }, pool: Settlement[], provenUnique: boolean): boolean => {
     const conflicting = members.filter((s) => suggested.has(s.id));
     if (conflicting.length > 0) {
       conflicts.set(line.id, { line, members, conflicting, method: kind });
       return false;
+    }
+    if (members.length === 1) {
+      // A single settlement equal to the credit is an amount-only match. Auto-match only when the narration
+      // names the gateway AND no other pool settlement could be it; otherwise a human approves it.
+      const only = members[0] as Settlement;
+      const text = line.narration.toUpperCase();
+      const pattern = b.single_settlement_gateway_patterns.find((p) => text.includes(p.toUpperCase())) ?? null;
+      const sameAmount = pool.filter((s) => s.amount_paise === only.amount_paise).length;
+      if (!pattern || !provenUnique || sameAmount !== 1) {
+        suggest(line, only, {
+          ...trace,
+          rule: "stage2.batch_single_settlement",
+          reason: !pattern ? "gateway_not_identified" : "not_unique_in_pool",
+          gateway_pattern: pattern,
+          same_amount_in_pool: sameAmount,
+          uniqueness_proven: provenUnique,
+        });
+        return false;
+      }
+      trace = { ...trace, single_settlement: { gateway_pattern: pattern, same_amount_in_pool: sameAmount, uniqueness_proven: true } };
     }
     for (const s of members) {
       state.linked.set(s.id, line.id);
@@ -125,12 +165,14 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
       const affordable = pool.filter((s) => s.amount_paise <= line.credit_paise);
       const general = affordable.length <= b.mitm_max_n ? findSubsetsWithSum(affordable.map((s) => s.amount_paise), line.credit_paise, opts).status : "not_checked";
       progress =
-        accept(line, members, "BATCH_CONTIGUOUS", {
-          rule: "stage2.batch_contiguous_run",
-          assumption: CONTIGUITY_ASSUMPTION,
-          pool_size: pool.length,
-          arbitrary_subset_search: general,
-        }) || progress;
+        accept(
+          line,
+          members,
+          "BATCH_CONTIGUOUS",
+          { rule: "stage2.batch_contiguous_run", assumption: CONTIGUITY_ASSUMPTION, pool_size: pool.length, arbitrary_subset_search: general },
+          pool,
+          general === "unique",
+        ) || progress;
     }
     if (!progress) break;
   }
@@ -155,19 +197,19 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
         last.delete(line.id);
         const members = (res.solutions[0] ?? []).map((i) => pool[i] as Settlement);
         const trace = { rule: "stage2.batch_unique_subset", method: res.method, complement: res.complement, pool_size: pool.length };
-        progress = accept(line, members, "BATCH", trace) || progress;
+        progress = accept(line, members, "BATCH", trace, pool, true) || progress;
       } else {
         last.set(line.id, { line, res, pool, ordered });
         if (res.status === "ambiguous" || res.status === "budget_exhausted") retry.push(line);
       }
     }
     if (!progress) break;
-    pending = retry.filter((l) => !state.resolvedCredits.has(l.id));
+    pending = retry.filter((l) => !state.resolvedCredits.has(l.id) && !state.suggestions.has(l.id));
   }
 
   for (const { line, members, conflicting, method } of conflicts.values()) {
     result.stats.conflicts++;
-    for (const s of members) result.reserved.add(s.id);
+    for (const s of members) reserve(s.id, line.id);
     const lines = [...new Set(conflicting.flatMap((s) => suggestingLines(s.id)))];
     result.exceptions.push({
       type: "MATCH_CONFLICT",
@@ -205,7 +247,7 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
       .sort((x, y) => x.blocks - y.blocks || x.distance - y.distance || x.set.length - y.set.length)
       .slice(0, b.max_candidate_sets);
     // Any settlement in the pool could belong to this credit until a human resolves it.
-    for (const s of pool) result.reserved.add(s.id);
+    for (const s of pool) reserve(s.id, line.id);
     result.exceptions.push({
       type: "AMBIGUOUS_BATCH",
       amount_paise: line.credit_paise,
