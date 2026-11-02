@@ -1,0 +1,55 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import { openReconDb, openTruthDb, type Db } from "../src/db/open.ts";
+import { FINANCIAL_TABLES } from "../src/db/schema.ts";
+import { generateDataset, type Dataset } from "../src/generator/generate.ts";
+import { loadDataset } from "../src/generator/load.ts";
+import { readTruthLabels, readTruthLinks } from "../src/truth/store.ts";
+
+let ds: Dataset;
+let recon: Db;
+let truth: Db;
+
+beforeAll(() => {
+  ds = generateDataset({ seed: 11, payments: 1500 });
+  recon = openReconDb(":memory:");
+  truth = openTruthDb(":memory:");
+  loadDataset(recon, truth, ds);
+});
+
+const count = (db: Db, table: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+
+describe("recon database", () => {
+  it("stores every generated record", () => {
+    expect(count(recon, "payments")).toBe(ds.payments.length);
+    expect(count(recon, "settlement_items")).toBe(ds.settlementItems.length);
+    expect(count(recon, "bank_lines")).toBe(ds.bankLines.length);
+    expect(count(recon, "ledger_entries")).toBe(ds.ledgerEntries.length);
+  });
+
+  it.each(FINANCIAL_TABLES)("blocks UPDATE and DELETE on %s", (table) => {
+    expect(() => recon.prepare(`UPDATE ${table} SET id = id`).run()).toThrow(/insert-only/);
+    expect(() => recon.prepare(`DELETE FROM ${table}`).run()).toThrow(/insert-only/);
+  });
+
+  it("rejects fractional money at the storage layer (STRICT tables)", () => {
+    expect(() =>
+      recon
+        .prepare("INSERT INTO payments (id, order_id, amount_paise, method, status, captured_at) VALUES ('p_x','o_x',100.5,'upi','captured','2026-10-01T10:00:00+05:30')")
+        .run(),
+    ).toThrow();
+  });
+
+  it("contains no ground truth: no truth tables and no split boundary in metadata", () => {
+    const tables = (recon.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((r) => r.name);
+    expect(tables.some((t) => t.startsWith("truth"))).toBe(false);
+    const keys = (recon.prepare("SELECT key FROM dataset_meta").all() as { key: string }[]).map((r) => r.key);
+    expect(keys).not.toContain("heldout_start");
+  });
+});
+
+describe("truth database", () => {
+  it("round-trips labels and links through zod", () => {
+    expect(readTruthLabels(truth)).toEqual(ds.labels);
+    expect(readTruthLinks(truth)).toEqual(ds.links);
+  });
+});

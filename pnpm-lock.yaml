@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@closeloop/core':
+        specifier: workspace:*
+        version: link:packages/core
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1

@@ -1,0 +1,10 @@
+{
+  "note": "Illustrative gateway fee rates in basis points (1 bps = 0.01%). GST is charged on the fee, not on the payment amount.",
+  "gateway_fee_bps": {
+    "upi": 175,
+    "card": 200,
+    "netbanking": 190,
+    "wallet": 190
+  },
+  "gst_bps": 1800
+}

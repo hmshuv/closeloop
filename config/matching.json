@@ -1,0 +1,10 @@
+{
+  "batch": {
+    "window_business_days": 7,
+    "time_budget_ms": 250,
+    "node_budget": 5000000,
+    "mitm_max_n": 36,
+    "max_candidate_sets": 5
+  },
+  "amount_mismatch_rounding_threshold_paise": 100
+}

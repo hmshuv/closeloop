@@ -149,3 +149,14 @@ The weights, thresholds and margin live in config. The trace stores every compon
 
 ## Verification, every phase
 `pnpm typecheck && pnpm lint && pnpm test` must all be green before committing. Phase-specific checks are listed above. Commits stay local; I won't push to a remote unless you ask.
+
+## Decisions log (made during implementation)
+- **Phase 0**: TypeScript is pinned to `~6.0.3` (typescript-eslint 8 supports < 6.1). `@types/node` is pinned to v20 so the code stays within the Node 20 API. pnpm 11 uses `allowBuilds` (better-sqlite3, esbuild).
+- **Phase 1, money type**: `Paise` is a plain `number` alias validated by `PaiseSchema` / `assertPaise`, not a branded type. Branding forced re-wrapping after every sum without adding safety beyond the zod/STRICT-table checks.
+- **Phase 1, eval sizing (your decision)**: `pnpm gen` keeps the spec default of 5,000 payments (~300 settlements) for the demo. Eval uses a larger dataset, and CI runs `pnpm eval --payments 5000` as a smoke check. **Noise rates are realistic and never inflated to hit the per-type minimum**; the dataset grows instead. The generator only *reports* held-out coverage, and eval enforces it.
+- **Phase 1, scaling**: `generateDataset({ days })` can lengthen the period, so a larger dataset can keep the demo's daily volume.
+- **Phase 1, coverage measured** (seed 42, realistic rates): the scarcest held-out targets have 2 at 25k payments, 9 at 100k and 14 at 150k. Reaching 15 per type needs roughly 150k+ payments. The size the full eval uses is still open (see the Phase 1 summary).
+- **Phase 1, consolidation share**: 20% of settlements arrive inside consolidated credits (sizes mostly 2–15, a 10% tail up to 40, always within `W_batch`).
+- **Phase 1, ambiguity traps**: built from twin settlements with identical subscription-price baskets, so their nets are equal. One twin arrives inside a consolidated credit and the other never arrives. Because the right answer is undecidable, the expected output is `AMBIGUOUS_BATCH`, and the twin itself carries no expected exception.
+- **Phase 1, ground-truth isolation**: truth readers are exported only through the `@closeloop/core/truth` subpath, never from the package root. The recon DB's metadata omits the held-out boundary.
+- **Phase 1, held-out-only variants**: `HELDOUT_NARRATION_FORMAT` (an IMPS-INF payout narration with a dot-separated UTR after `REF`) and `HELDOUT_OCR_CONFUSION` (0↔O, 1↔I, 5↔S, 8↔B).
