@@ -35,6 +35,8 @@ export const SettlementSchema = z.object({
   utr: z.string().min(1),
   amount_paise: PaiseSchema,
   settled_at: IsoDateSchema,
+  /** When the gateway created the settlement; gives same-day settlements a real order. */
+  created_at: IstTimestampSchema,
 });
 export type Settlement = z.infer<typeof SettlementSchema>;
 

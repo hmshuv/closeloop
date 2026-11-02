@@ -1,10 +1,32 @@
 {
   "batch": {
-    "window_business_days": 7,
+    "window_business_days": 2,
     "time_budget_ms": 250,
     "node_budget": 5000000,
     "mitm_max_n": 36,
-    "max_candidate_sets": 5
+    "max_candidate_sets": 5,
+    "max_passes": 4
   },
-  "amount_mismatch_rounding_threshold_paise": 100
+  "amount_mismatch_rounding_threshold_paise": 100,
+  "fuzzy": {
+    "date_tolerance_business_days": 2,
+    "min_token_length": 8,
+    "max_token_length": 22,
+    "min_truncated_length": 10,
+    "auto_max_distance": 1,
+    "suggest_max_distance": 2,
+    "margin": 0.05,
+    "max_candidates_shown": 5
+  },
+  "ledger": {
+    "date_tolerance_business_days": 2,
+    "receipt_grace_business_days": 1,
+    "party_aliases": {
+      "Razorpay Software Pvt Ltd": [
+        "RAZORPAY",
+        "RZPY",
+        "RZP"
+      ]
+    }
+  }
 }

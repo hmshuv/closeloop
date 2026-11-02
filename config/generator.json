@@ -6,16 +6,28 @@
   "eval_payments": 25000,
   "heldout_min_per_type": 15,
   "settlement_chunk_target": 17,
-  "method_mix": { "upi": 0.55, "card": 0.25, "netbanking": 0.12, "wallet": 0.08 },
+  "method_mix": {
+    "upi": 0.55,
+    "card": 0.25,
+    "netbanking": 0.12,
+    "wallet": 0.08
+  },
   "failed_payment_rate": 0.02,
   "refund_rate": 0.04,
   "partial_refund_share": 0.35,
   "opening_balance_paise": 250000000,
   "consolidation": {
     "settlement_share": 0.2,
-    "small_size": [2, 15],
-    "large_size": [16, 40],
-    "large_share": 0.1
+    "small_size": [
+      2,
+      15
+    ],
+    "large_size": [
+      16,
+      40
+    ],
+    "large_share": 0.1,
+    "non_contiguous_share": 0.25
   },
   "noise_rates": {
     "MISSING_SETTLEMENT": 0.002,
@@ -41,5 +53,15 @@
     "PHANTOM_RECEIPT": 0.005,
     "HELDOUT_NARRATION_FORMAT": 0.08,
     "HELDOUT_OCR_CONFUSION": 0.06
-  }
+  },
+  "eval_seeds": [
+    101,
+    202,
+    303,
+    404,
+    505,
+    606,
+    707,
+    808
+  ]
 }

@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gen": "tsx scripts/gen.ts"
+    "gen": "tsx scripts/gen.ts",
+    "recon": "tsx scripts/recon.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

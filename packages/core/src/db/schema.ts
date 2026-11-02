@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS settlements (
   id           TEXT PRIMARY KEY,
   utr          TEXT NOT NULL UNIQUE,
   amount_paise INTEGER NOT NULL,
-  settled_at   TEXT NOT NULL
+  settled_at   TEXT NOT NULL,
+  created_at   TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS settlement_items (
@@ -85,7 +86,63 @@ CREATE TRIGGER IF NOT EXISTS ${table}_no_delete BEFORE DELETE ON ${table}
 BEGIN SELECT RAISE(ABORT, '${table} is insert-only'); END;`;
 }
 
-export const RECON_SCHEMA = FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n");
+/** Engine output. Written by runs (and, in later phases, by human review actions) — never by the AI layer. */
+const RECON_OUTPUT_DDL = `
+CREATE TABLE IF NOT EXISTS recon_runs (
+  id           TEXT PRIMARY KEY,
+  from_date    TEXT NOT NULL,
+  to_date      TEXT NOT NULL,
+  as_of        TEXT NOT NULL,
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT NOT NULL,
+  config_hash  TEXT NOT NULL,
+  summary_json TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS matches (
+  id          TEXT PRIMARY KEY,
+  run_id      TEXT NOT NULL REFERENCES recon_runs(id),
+  kind        TEXT NOT NULL,
+  left_type   TEXT NOT NULL,
+  left_id     TEXT NOT NULL,
+  right_type  TEXT NOT NULL,
+  right_id    TEXT NOT NULL,
+  confidence  REAL NOT NULL,
+  reason_code TEXT NOT NULL,
+  anchor_date TEXT NOT NULL,
+  trace_json  TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS exceptions (
+  id             TEXT PRIMARY KEY,
+  run_id         TEXT NOT NULL REFERENCES recon_runs(id),
+  type           TEXT NOT NULL,
+  exposure_class TEXT NOT NULL,
+  amount_paise   INTEGER NOT NULL CHECK (amount_paise >= 0),
+  subtype        TEXT,
+  primary_type   TEXT NOT NULL,
+  primary_id     TEXT NOT NULL,
+  anchor_date    TEXT NOT NULL,
+  related_json   TEXT NOT NULL,
+  trace_json     TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN ('open','approved','escalated'))
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS batch_candidate_sets (
+  exception_id        TEXT NOT NULL REFERENCES exceptions(id),
+  set_index           INTEGER NOT NULL,
+  settlement_ids_json TEXT NOT NULL,
+  PRIMARY KEY (exception_id, set_index)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_matches_run ON matches(run_id);
+CREATE INDEX IF NOT EXISTS idx_matches_left ON matches(left_id);
+CREATE INDEX IF NOT EXISTS idx_matches_right ON matches(right_id);
+CREATE INDEX IF NOT EXISTS idx_exceptions_run ON exceptions(run_id, type);
+CREATE INDEX IF NOT EXISTS idx_exceptions_primary ON exceptions(primary_id);
+`;
+
+export const RECON_SCHEMA = FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n") + RECON_OUTPUT_DDL;
 
 /** Ground truth lives in its own database file. The matcher is never handed this connection. */
 export const TRUTH_SCHEMA = `

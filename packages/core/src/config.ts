@@ -34,8 +34,24 @@ export const MatchingConfigSchema = z.object({
     node_budget: z.number().int().positive(),
     mitm_max_n: z.number().int().positive().max(40),
     max_candidate_sets: z.number().int().positive(),
+    max_passes: z.number().int().positive(),
   }),
   amount_mismatch_rounding_threshold_paise: PaiseSchema.nonnegative(),
+  fuzzy: z.object({
+    date_tolerance_business_days: z.number().int().nonnegative(),
+    min_token_length: z.number().int().positive(),
+    max_token_length: z.number().int().positive(),
+    min_truncated_length: z.number().int().positive(),
+    auto_max_distance: z.number().int().nonnegative(),
+    suggest_max_distance: z.number().int().nonnegative(),
+    margin: z.number().min(0).max(1),
+    max_candidates_shown: z.number().int().positive(),
+  }),
+  ledger: z.object({
+    date_tolerance_business_days: z.number().int().nonnegative(),
+    receipt_grace_business_days: z.number().int().nonnegative(),
+    party_aliases: z.record(z.string(), z.array(z.string().min(2))),
+  }),
 });
 
 export const GeneratorConfigSchema = z.object({
@@ -44,6 +60,8 @@ export const GeneratorConfigSchema = z.object({
   heldout_share: z.number().gt(0).lt(1),
   default_payments: z.number().int().positive(),
   eval_payments: z.number().int().positive(),
+  /** Fixed up front; eval consumes them in order and may stop early only on truth-label coverage. */
+  eval_seeds: z.array(z.number().int().nonnegative()).min(1),
   heldout_min_per_type: z.number().int().nonnegative(),
   settlement_chunk_target: z.number().int().positive(),
   method_mix: perMethod(z.number().nonnegative()),
@@ -56,6 +74,8 @@ export const GeneratorConfigSchema = z.object({
     small_size: IntRange,
     large_size: IntRange,
     large_share: Rate,
+    /** Share of consolidations whose members are not consecutive in time. */
+    non_contiguous_share: Rate,
   }),
   noise_rates: z.record(NoiseKindSchema, Rate),
 });

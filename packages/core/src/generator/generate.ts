@@ -416,18 +416,23 @@ function buildSettlements(ctx: Ctx, rng: Rng, recs: PaymentRec[], refunds: Refun
 
   drafts.sort((a, b) => a.settledAt.localeCompare(b.settledAt) || a.key.localeCompare(b.key));
   let itemSeq = 0;
-  for (const d of drafts) {
+  let sameDay = 0;
+  drafts.forEach((d, i) => {
+    sameDay = i > 0 && drafts[i - 1]?.settledAt === d.settledAt ? sameDay + 1 : 0;
     const id = uniqueId(ctx, rng, "setl");
     const amount = draftNet(d);
     if (amount <= 0) throw new Error(`generator invariant: settlement ${d.key} has non-positive amount`);
-    d.settlement = { id, utr: freshUtr(ctx, rng, d.settledAt), amount_paise: amount, settled_at: d.settledAt };
+    // Settlements are created through the day from 09:00, one minute apart, in a stable order.
+    const minutes = 9 * 60 + sameDay;
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}:00`;
+    d.settlement = { id, utr: freshUtr(ctx, rng, d.settledAt), amount_paise: amount, settled_at: d.settledAt, created_at: `${d.settledAt}T${time}+05:30` };
     ctx.splitOf.set(id, d.split);
     for (const it of d.items) {
       it.id = `sitm_${String(++itemSeq).padStart(7, "0")}`;
       it.settlement_id = id;
       ctx.splitOf.set(it.id, d.split);
     }
-  }
+  });
   for (const { draft, shift } of late) {
     const s = must(draft.settlement, "settlement");
     label(ctx, "LATE_SETTLEMENT", s.id, draft.split, { due_date: draft.due, settled_at: s.settled_at, business_days_late: shift });
@@ -502,26 +507,50 @@ function buildCredits(ctx: Ctx, rng: Rng, drafts: SettlementDraft[], trapKeys: {
         if (others.length === 0) continue;
         for (const d of [s, ...others]) claimed.add(d);
         payout(split, s.settledAt, [s, ...others], "MATCH_CONFLICT_TRAP", { conflicting_settlement_id: stl(s).id });
-        const decoyRef = typoUtr(rng, stl(s).utr, rng.int(2, 3));
+        // Exactly two edits: close enough to be suggested, never close enough to auto-match.
+        const decoyRef = typoUtr(rng, stl(s).utr, 2);
         credit(split, s.settledAt, stl(s).amount_paise, devNarration(rng, decoyRef, ctx.mid), decoyRef, [], [{ kind: "CONFLICT_DECOY", details: { resembles_settlement_id: stl(s).id } }], false);
         break;
       }
     }
 
+    // Consolidated payouts. Most are contiguous — every settlement created over a stretch of time is
+    // paid out together (weekends, holidays, held-funds releases); the rest pick arbitrary members.
+    // `all` is in settlement created_at order, so a contiguous payout is a consecutive slice of it.
     const target = Math.round(cons.settlement_share * all.length);
+    const position = new Map(all.map((d, i) => [d, i]));
     let absorbed = 0;
+    let made = 0;
     for (const anchor of rng.shuffle(all)) {
       if (absorbed >= target) break;
       if (!isFree(anchor)) continue;
       const next = nextBusinessDay(anchor.settledAt, cal);
       const date = rng.chance(0.5) && next <= ctx.end ? next : anchor.settledAt;
+      const earliest = windowStart(date, W, cal);
       const [lo, hi] = rng.chance(cons.large_share) ? cons.large_size : cons.small_size;
-      const pool = inWindow(all, date).filter((d) => d !== anchor && isFree(d));
-      const members = [anchor, ...rng.sample(pool, rng.int(lo, hi) - 1)];
+      const size = rng.int(lo, hi);
+      // Held-out always gets at least one non-contiguous payout, so the contiguity assumption is tested.
+      const contiguous = !(rng.chance(cons.non_contiguous_share) || (split === "heldout" && made === 0));
+      let members: SettlementDraft[];
+      if (contiguous) {
+        members = [];
+        for (let i = must(position.get(anchor), "anchor position"); i >= 0 && members.length < size; i--) {
+          const d = must(all[i], "draft");
+          if (!isFree(d) || d.settledAt < earliest) break;
+          members.unshift(d);
+        }
+      } else {
+        const pool = inWindow(all, date).filter((d) => d !== anchor && isFree(d));
+        members = [anchor, ...rng.sample(pool, size - 1)];
+      }
       if (members.length < 2) continue;
       for (const d of members) claimed.add(d);
       absorbed += members.length;
-      payout(split, date, members, "CONSOLIDATED_CREDIT", { size: members.length });
+      made++;
+      // Label what was actually produced: a random pick can happen to be consecutive.
+      const idx = members.map((d) => must(position.get(d), "member position")).sort((a, b) => a - b);
+      const consecutive = idx.every((v, i) => i === 0 || v === (idx[i - 1] as number) + 1);
+      payout(split, date, members, "CONSOLIDATED_CREDIT", { size: members.length, contiguous: consecutive, generated_as: contiguous ? "contiguous" : "arbitrary" });
     }
 
     const remaining = rng.shuffle(all.filter(isFree));
@@ -649,9 +678,14 @@ function buildLedger(ctx: Ctx, rng: Rng, credits: CreditSpec[], debits: DebitLin
     const inSplit = credits.filter((c) => c.split === split);
     const eligible = inSplit.filter((c) => c.ledgerNoiseEligible);
     const noise = new Map<CreditSpec, NoiseKind>();
-    const pool = rng.shuffle(eligible);
+    let pool = rng.shuffle(eligible);
+    const grace = ctx.cfg.matching.ledger.receipt_grace_business_days;
     for (const kind of RECEIPT_NOISE) {
-      for (const c of pool.splice(0, Math.min(noiseCount(ctx, kind, split, eligible.length), pool.length))) noise.set(c, kind);
+      // A receipt can't be "missing" while it is still inside the booking grace period at period end.
+      const candidates = kind === "MISSING_LEDGER_RECEIPT" ? pool.filter((c) => addBusinessDays(c.date, grace, cal) <= ctx.end) : pool;
+      const chosen = new Set(candidates.slice(0, noiseCount(ctx, kind, split, eligible.length)));
+      for (const c of chosen) noise.set(c, kind);
+      pool = pool.filter((c) => !chosen.has(c));
     }
 
     for (const c of inSplit) {

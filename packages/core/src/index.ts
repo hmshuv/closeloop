@@ -10,4 +10,11 @@ export { generateDataset, GATEWAY_PARTY, type Dataset, type DatasetMeta, type Ge
 export { partitionDataset, datasetHash, heldoutCoverage, type CoverageRow } from "./generator/split.ts";
 export { loadDataset } from "./generator/load.ts";
 export { COVERAGE_TARGETS, HELDOUT_ONLY_NOISE, NOISE_EXPECTATIONS } from "./generator/catalog.ts";
+export { reconcile, type ReconResult, type ClassifiedException } from "./matcher/reconcile.ts";
+export { runReconciliation, summarize, ReconSummarySchema, type ReconSummary, type RunOptions } from "./matcher/run.ts";
+export { loadSource, datasetMeta } from "./matcher/load.ts";
+export { EXPOSURE_BY_TYPE, exposureClassOf, summarizeExposure, type ExposureSummary } from "./matcher/exposure.ts";
+export { findSubsetsWithSum, type SubsetSumResult, type SubsetSumOptions } from "./matcher/subsetsum.ts";
+export { computeTieOut, type TieOut } from "./matcher/tieout.ts";
+export * from "./matcher/types.ts";
 // Ground-truth readers are deliberately NOT exported here; eval imports them from "@closeloop/core/truth".

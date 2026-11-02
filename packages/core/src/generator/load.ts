@@ -21,7 +21,7 @@ export function loadDataset(recon: Db, truth: Db | null, ds: Dataset): void {
   const meta = insert("dataset_meta", ["key", "value"]);
   const payments = insert("payments", ["id", "order_id", "amount_paise", "method", "status", "captured_at"]);
   const refunds = insert("refunds", ["id", "payment_id", "amount_paise", "created_at"]);
-  const settlements = insert("settlements", ["id", "utr", "amount_paise", "settled_at"]);
+  const settlements = insert("settlements", ["id", "utr", "amount_paise", "settled_at", "created_at"]);
   const items = insert("settlement_items", ["id", "settlement_id", "entity_type", "entity_id", "gross_paise", "fee_paise", "gst_paise", "net_paise"]);
   const bank = insert("bank_lines", ["id", "txn_date", "narration", "credit_paise", "debit_paise", "balance_paise"]);
   const ledger = insert("ledger_entries", ["id", "entry_date", "voucher_type", "party", "amount_paise", "reference", "narration"]);
