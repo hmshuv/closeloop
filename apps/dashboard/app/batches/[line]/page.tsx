@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BatchIndex, BatchView } from "@/components/batch-view";
+import { BatchIndex, BatchView, compactLine } from "@/components/batch-view";
 import { PageTitle } from "@/components/ui";
 import { batchFor, snapshot } from "@/lib/snapshot";
 
@@ -25,7 +25,9 @@ export default async function BatchPage({ params }: { params: Promise<{ line: st
       <Link href="/batches/" className="text-xs text-zinc-500 hover:underline">
         ← Batch decomposition
       </Link>
-      <PageTitle title={`Bank credit ${b.bank_line.id}`}>{b.summary}</PageTitle>
+      <PageTitle title={`Bank credit ${b.bank_line.id}`}>
+        <span className="tabular">{compactLine(b)}</span>
+      </PageTitle>
       <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
         <div className="min-w-0">
           <BatchView b={b} />

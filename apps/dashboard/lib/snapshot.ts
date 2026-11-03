@@ -89,6 +89,8 @@ export interface Decomposition {
   status: "decomposed" | "matched_single_settlement" | "human_approved" | "ambiguous" | "conflict" | "suggested" | "unidentified";
   match_kind: string | null;
   assumption: string | null;
+  /** Verdict of the exhaustive subset search; "unique" = proven without the payout-model assumption. */
+  full_search: "unique" | "ambiguous" | "none" | "budget_exhausted" | "not_checked" | null;
   settlements: SettlementLine[];
   settlements_total: Money | null;
   difference_vs_credit: Money | null;
