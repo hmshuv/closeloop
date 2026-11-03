@@ -4,6 +4,7 @@ A static Next.js export of one reconciliation snapshot. It reads only `data/snap
 
 ```bash
 pnpm snapshot                   # from the repo root: regenerate data/snapshot.json (uses .env for LLM explanations, optional)
+pnpm snapshot --refresh-batches # re-record only the deterministic batch decompositions (no LLM calls); aborts on any drift
 pnpm --filter dashboard dev     # http://localhost:3000
 pnpm --filter dashboard build   # static site in apps/dashboard/out/
 ```

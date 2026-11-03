@@ -24,13 +24,15 @@ function statusBadge(b: Decomposition): [string, Tone] {
 const countTone = (b: Decomposition): Tone => (b.status === "ambiguous" ? "amber" : b.status === "conflict" ? "rose" : "green");
 
 const provenByFullSearch = (b: Decomposition) => b.match_kind === "BATCH_CONTIGUOUS" && b.full_search === "unique";
+/** Contiguous match where the exhaustive search found other sets too: correct only under the payout-model assumption. */
+const assumptionOnly = (b: Decomposition) => b.match_kind === "BATCH_CONTIGUOUS" && b.full_search === "ambiguous";
 
 function uniquenessNote(b: Decomposition): string {
   if (b.match_kind === "BATCH_CONTIGUOUS") {
     const base = b.assumption ?? "Unique among contiguous runs (payout-model assumption).";
-    return provenByFullSearch(b)
-      ? `${base} Here the exhaustive subset search also found no other set of unmatched settlements that sums to this credit, so the match holds even without that assumption.`
-      : base;
+    if (provenByFullSearch(b)) return `${base} Here the exhaustive subset search also found no other set of unmatched settlements that sums to this credit, so the match holds even without that assumption.`;
+    if (assumptionOnly(b)) return `${base} Here the exhaustive subset search found other, non-contiguous sets that also sum to this credit, so this match is correct only if the payout model holds.`;
+    return base;
   }
   if (b.match_kind === "BATCH") return "Proven unique: an exhaustive subset search found exactly one set of unmatched settlements in the window that sums to this credit.";
   if (b.status === "ambiguous") return "Several different sets of settlements sum exactly to this credit, so the amounts alone cannot say which one is right. Candidate sets are ranked by contiguity, then date closeness.";
@@ -79,6 +81,11 @@ export function BatchView({ b }: { b: Decomposition }) {
         <span className="flex flex-wrap gap-1.5">
           <Badge tone={tone}>{label}</Badge>
           {b.match_kind && !isSinglePayout(b) && <Badge tone="sky">{KIND_LABEL[b.match_kind] ?? b.match_kind}</Badge>}
+          {assumptionOnly(b) && (
+            <Badge tone="amber" title="The exhaustive subset search found other sets of settlements that also sum to this credit">
+              Relies on payout-model assumption
+            </Badge>
+          )}
           {provenByFullSearch(b) && (
             <Badge tone="green" title="The exhaustive arbitrary-subset search also found exactly one set of settlements that sums to this credit">
               Proven unique (full search)

@@ -1,5 +1,6 @@
 /**
  * pnpm snapshot [--no-llm] [--pace-ms 20000] [--top 20] [--repo-url https://github.com/you/closeloop]
+ * pnpm snapshot --refresh-batches   (re-record only the deterministic batch decompositions; no LLM calls)
  *
  * Seeds the demo dataset, runs the October reconciliation and records the real MCP tool outputs into
  * apps/dashboard/data/snapshot.json for the read-only dashboard. LLM explanations (from .env) are generated
@@ -23,13 +24,33 @@ const RETRYABLE = new Set(["rate_limited", "timeout", "network", "http_429", "ht
 
 loadEnvFile();
 const { values } = parseArgs({
-  options: { "no-llm": { type: "boolean", default: false }, "pace-ms": { type: "string", default: "20000" }, top: { type: "string", default: "20" }, "repo-url": { type: "string" } },
+  options: { "refresh-batches": { type: "boolean", default: false }, "no-llm": { type: "boolean", default: false }, "pace-ms": { type: "string", default: "20000" }, top: { type: "string", default: "20" }, "repo-url": { type: "string" } },
 });
 const cfg = loadConfig();
 const provider = values["no-llm"] ? null : providerFromEnv(process.env, cfg.ai.timeout_ms);
 const paceMs = Number(values["pace-ms"]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (...a: unknown[]) => console.error("[snapshot]", ...a);
+
+/**
+ * The public dashboard must not show any real company's name. The synthetic data imitates a real gateway's
+ * narrations and ledger party, so gateway names are replaced with a neutral "Gateway" for display. Ids,
+ * amounts and match results are untouched; the engine itself ran on the original synthetic text.
+ */
+const REDACTIONS: [RegExp, string][] = [
+  [/RAZORPAY SOFTWARE PVT LTD/g, "GATEWAY SETTLEMENTS PVT LTD"],
+  [/RAZORPAY SOFTWARE/g, "GATEWAY SETTLEMENTS"],
+  [/RAZORPAY SOFTW/g, "GATEWAY SETTL"],
+  [/Razorpay Software Pvt Ltd/g, "Gateway Settlements Pvt Ltd"],
+  [/Razorpay-style/g, "gateway"],
+  [/RZP PAYOUTS/g, "PGW PAYOUTS"],
+  [/\bRZPY\b/g, "PGW"],
+  [/\bRZP\b/g, "PGW"],
+  [/RAZORPAY/g, "GATEWAY"],
+  [/Razorpay/g, "Gateway"],
+  [/razorpay/g, "gateway"],
+];
+const redact = (text: string) => REDACTIONS.reduce((t, [re, to]) => t.replace(re, to), text);
 
 async function connect(db: Db, withLlm: boolean): Promise<Client> {
   const server = createCloseLoopServer({ db, cfg, provider: withLlm ? provider : null, confirmations: new ConfirmationStore() });
@@ -59,6 +80,48 @@ function repoUrl(): string | null {
 }
 
 const started = Date.now();
+
+/**
+ * --refresh-batches: re-run the deterministic engine and re-record only the batch decompositions, keeping the
+ * existing explanations (and their audit history) untouched. Same seed + same engine must reproduce the same
+ * decompositions; anything other than new fields is treated as drift and aborts.
+ */
+if (values["refresh-batches"]) {
+  const existing = JSON.parse(readFileSync(OUT, "utf8")) as { batches: Structured[]; [k: string]: unknown };
+  const { db } = openDatabase(":memory:", cfg);
+  const client = await connect(db, false);
+  await call(client, "run_reconciliation", { from: FROM, to: TO });
+  const shape = (b: Structured) =>
+    JSON.stringify({
+      line: (b.bank_line as Structured).id,
+      status: b.status,
+      kind: b.match_kind,
+      settlements: (b.settlements as Structured[]).map((x) => x.settlement_id).sort(),
+      sets: (b.candidate_sets as Structured[]).map((c) => (c.settlement_ids as string[]).slice().sort()),
+    });
+  const refreshed: Structured[] = [];
+  for (const old of existing.batches) {
+    const line = String((old.bank_line as Structured).id);
+    const fresh = await call(client, "decompose_bank_credit", { bank_line_id: line });
+    if (shape(fresh) !== shape(old)) throw new Error(`Batch ${line} differs from the committed snapshot; run a full \`pnpm snapshot\` instead.\n  committed: ${shape(old)}\n  fresh:     ${shape(fresh)}`);
+    // Keep the committed run and exception ids so links to the existing explanations stay valid.
+    let text = JSON.stringify(fresh);
+    if (typeof fresh.exception_id === "string" && typeof old.exception_id === "string") text = text.replaceAll(fresh.exception_id, old.exception_id);
+    text = text.replaceAll(String(fresh.run_id), String(old.run_id));
+    refreshed.push(JSON.parse(text) as Structured);
+  }
+  let sha: string | null = null;
+  try {
+    sha = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    /* not a git checkout */
+  }
+  const out = redact(JSON.stringify({ ...existing, batches: refreshed, batches_refreshed_at: new Date().toISOString(), batches_refreshed_from_commit: sha }));
+  if (/razorpay|\brzpy?\b/i.test(out) || /gsk_|sk-[A-Za-z0-9]{10}|LLM_API_KEY|Bearer /.test(out)) throw new Error("Refusing to write: real gateway name or secret-like text");
+  writeFileSync(OUT, out + "\n");
+  log(`refreshed ${refreshed.length} batch decompositions in ${OUT}; explanations untouched`);
+  process.exit(0);
+}
 const { db } = openDatabase(":memory:", cfg);
 const llmClient = await connect(db, true);
 const plainClient = await connect(db, false);
@@ -166,25 +229,6 @@ const snapshot = {
   eval: evalJson,
 };
 
-/**
- * The public dashboard must not show any real company's name. The synthetic data imitates a real gateway's
- * narrations and ledger party, so gateway names are replaced with a neutral "Gateway" for display. Ids,
- * amounts and match results are untouched; the engine itself ran on the original synthetic text.
- */
-const REDACTIONS: [RegExp, string][] = [
-  [/RAZORPAY SOFTWARE PVT LTD/g, "GATEWAY SETTLEMENTS PVT LTD"],
-  [/RAZORPAY SOFTWARE/g, "GATEWAY SETTLEMENTS"],
-  [/RAZORPAY SOFTW/g, "GATEWAY SETTL"],
-  [/Razorpay Software Pvt Ltd/g, "Gateway Settlements Pvt Ltd"],
-  [/Razorpay-style/g, "gateway"],
-  [/RZP PAYOUTS/g, "PGW PAYOUTS"],
-  [/\bRZPY\b/g, "PGW"],
-  [/\bRZP\b/g, "PGW"],
-  [/RAZORPAY/g, "GATEWAY"],
-  [/Razorpay/g, "Gateway"],
-  [/razorpay/g, "gateway"],
-];
-const redact = (text: string) => REDACTIONS.reduce((t, [re, to]) => t.replace(re, to), text);
 
 mkdirSync("apps/dashboard/data", { recursive: true });
 const text = redact(JSON.stringify(snapshot));
