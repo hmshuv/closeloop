@@ -10,6 +10,8 @@
     "url": "git+https://github.com/hmshuv/closeloop.git",
     "directory": "packages/mcp"
   },
+
+  
   "homepage": "https://github.com/hmshuv/closeloop#readme",
   "bugs": {
     "url": "https://github.com/hmshuv/closeloop/issues"
