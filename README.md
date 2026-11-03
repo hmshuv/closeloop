@@ -71,6 +71,8 @@ Then ask:
 
 ## Dashboard
 
+**Live: https://closeloop-ivory.vercel.app**: a read-only snapshot of the October demo run.
+
 [`apps/dashboard`](apps/dashboard) is a read-only static site built from one recorded snapshot of the October demo run (`pnpm snapshot`). It shows:
 - the month-end summary;
 - the exception queue;

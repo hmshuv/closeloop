@@ -68,6 +68,7 @@ export function BatchDiagram({
                   onMouseEnter={() => setActive(s.settlement_id)}
                   onMouseLeave={() => setActive(null)}
                   onFocus={() => setActive(s.settlement_id)}
+                  onClick={() => setActive(active === s.settlement_id ? null : s.settlement_id)}
                   onBlur={() => setActive(null)}
                   style={{ width: `${width}%` }}
                   className={`min-w-[3px] cursor-pointer border-r border-white/70 outline-none transition-opacity last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900 dark:border-zinc-900/70 ${hot ? "bg-rose-500" : SEGMENT_COLOURS[i % SEGMENT_COLOURS.length]} ${dim ? "opacity-35" : ""}`}
@@ -78,7 +79,7 @@ export function BatchDiagram({
         </div>
         <figcaption className="flex flex-wrap justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
           <span>
-            {settlements.length} settlement{settlements.length === 1 ? "" : "s"} in time order · hover a segment or row
+            {settlements.length} settlement{settlements.length === 1 ? "" : "s"} in time order · tap or hover a segment or row
             {highlight.length && highlightNote ? ` · red = ${highlightNote}` : ""}
           </span>
           <span className="tabular">
@@ -92,7 +93,7 @@ export function BatchDiagram({
           <thead className="text-left text-zinc-500 dark:text-zinc-400">
             <tr>
               <th className="py-1 pr-3 font-medium">Settlement</th>
-              <th className="py-1 pr-3 font-medium">UTR</th>
+              <th className="hidden py-1 pr-3 font-medium sm:table-cell">UTR</th>
               <th className="py-1 pr-3 font-medium">Settled</th>
               <th className="py-1 text-right font-medium">Amount</th>
             </tr>
@@ -106,10 +107,11 @@ export function BatchDiagram({
                   key={s.settlement_id}
                   onMouseEnter={() => setActive(s.settlement_id)}
                   onMouseLeave={() => setActive(null)}
+                  onClick={() => setActive(isActive ? null : s.settlement_id)}
                   className={`${isActive ? "bg-emerald-50 dark:bg-emerald-950/50" : hot ? "bg-rose-50 dark:bg-rose-950/40" : ""} cursor-default`}
                 >
                   <td className={`py-1 pr-3 ${isActive ? "font-semibold" : ""}`}>{s.settlement_id}</td>
-                  <td className="py-1 pr-3">{s.utr}</td>
+                  <td className="hidden py-1 pr-3 sm:table-cell">{s.utr}</td>
                   <td className="py-1 pr-3">{s.settled_at}</td>
                   <td className="py-1 text-right">{s.amount.amount_inr}</td>
                 </tr>
