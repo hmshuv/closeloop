@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "coverage/**"] },
+  { ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "coverage/**", "packages/mcp/config/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
@@ -20,7 +20,12 @@ export default tseslint.config(
     rules: { "no-console": ["error", { allow: ["error"] }] },
   },
   {
-    files: ["eslint.config.js", "packages/*/bin/*.js"],
+    files: ["eslint.config.js", "packages/*/bin/*.js", "**/*.mjs"],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    // Plain Node build/smoke scripts.
+    files: ["**/*.mjs"],
+    languageOptions: { globals: { URL: "readonly", console: "readonly", process: "readonly", Buffer: "readonly", setTimeout: "readonly" } },
   },
 );

@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./truth": "./src/truth/store.ts"
+    "./truth": "./src/truth/store.ts",
+    "./eval": "./src/eval/index.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

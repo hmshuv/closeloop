@@ -13,7 +13,11 @@
     "test:watch": "vitest",
     "gen": "tsx scripts/gen.ts",
     "recon": "tsx scripts/recon.ts",
-    "demo:cases": "tsx scripts/demo-cases.ts"
+    "demo:cases": "tsx scripts/demo-cases.ts",
+    "eval": "tsx scripts/eval.ts",
+    "build": "pnpm --filter closeloop-mcp build",
+    "mcp:dev": "node packages/mcp/bin/dev.js",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

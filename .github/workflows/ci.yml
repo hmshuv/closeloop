@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: typecheck · lint · test · eval smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from "packageManager" in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: Eval smoke (5k payments per seed; the full 25k eval runs locally and writes EVAL.md)
+        run: pnpm eval --payments 5000
+
+  package:
+    name: build + pack (file-list check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: npm pack (fails if .env, *.db, ~/.closeloop or sources would ship)
+        run: node scripts/pack-smoke.mjs --pack-only pack-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: closeloop-mcp-tarball
+          path: pack-out/*.tgz
+
+  clean-install:
+    name: clean install · ${{ matrix.os }} · Node ${{ matrix.node }}
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: closeloop-mcp-tarball
+          path: pack-out
+      - name: Install the tarball into an empty folder, start via npx, call one tool
+        shell: bash
+        run: node scripts/pack-smoke.mjs --tarball pack-out/closeloop-mcp-*.tgz

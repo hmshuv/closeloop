@@ -13,6 +13,10 @@ MCP-native reconciliation agent for Indian finance teams. Spec: `SPEC.md`. Desig
 - **MCP stdout is protocol-only.** Library code logs to stderr (`console.error`) only; eslint enforces this.
 - **Never hardcode or invent metrics** in README/EVAL.md — they come from `pnpm eval`.
 
+## Releasing
+- `pnpm build && pnpm pack:smoke` before any publish: it checks the tarball's file list (no `.env`, `*.db`, `~/.closeloop`, sources) and clean-installs it.
+- EVAL.md and the README Results block are only ever written by `pnpm eval`.
+
 ## Workflow
 - Tests required for every behaviour change (vitest, `packages/*/test`).
 - Before committing: `pnpm typecheck && pnpm lint && pnpm test` must be green.

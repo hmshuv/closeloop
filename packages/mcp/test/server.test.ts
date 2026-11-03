@@ -218,7 +218,7 @@ describe("two-step human actions", () => {
 describe("stdio transport", () => {
   it("writes only JSON-RPC to stdout; logs go to stderr", async () => {
     const home = mkdtempSync(join(tmpdir(), "closeloop-mcp-"));
-    const bin = fileURLToPath(new URL("../bin/closeloop-mcp.js", import.meta.url));
+    const bin = fileURLToPath(new URL("../bin/dev.js", import.meta.url));
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LLM_")));
     const child = spawn(process.execPath, [bin], { cwd: home, env: { ...env, HOME: home, CLOSELOOP_DB: join(home, "closeloop.db") }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";

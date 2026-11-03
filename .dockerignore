@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.git
+.github
+.env
+.env.*
+!.env.example
+**/*.db
+**/*.db-*
+data
+packages/mcp/dist
+packages/mcp/config
+EVAL.md
+DEMO.md

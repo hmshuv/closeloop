@@ -54,18 +54,25 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@closeloop/core':
-        specifier: workspace:*
-        version: link:../core
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@3.25.76)
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
+      better-sqlite3:
+        specifier: ^11.10.0
+        version: 11.10.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76
+    devDependencies:
+      '@closeloop/core':
+        specifier: workspace:*
+        version: link:../core
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
 
 packages:
 

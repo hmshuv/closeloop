@@ -1,15 +1,45 @@
 {
   "name": "closeloop-mcp",
   "version": "0.1.0",
-  "private": true,
+  "description": "MCP server for month-end reconciliation of Razorpay-style gateway settlements against the bank statement and the ledger. Deterministic matching (exact, fuzzy UTR, batch decomposition) with a constrained AI layer.",
   "type": "module",
+  "license": "MIT",
+  "author": "Himanshu Gupta",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "reconciliation",
+    "fintech",
+    "razorpay",
+    "india",
+    "gst",
+    "claude"
+  ],
   "bin": {
-    "closeloop-mcp": "./bin/closeloop-mcp.js"
+    "closeloop-mcp": "dist/closeloop-mcp.js"
+  },
+  "files": [
+    "dist",
+    "config",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node bin/dev.js",
+    "prepublishOnly": "node scripts/build.mjs"
   },
   "dependencies": {
-    "@closeloop/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "tsx": "^4.23.15",
+    "better-sqlite3": "^11.10.0",
     "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@closeloop/core": "workspace:*",
+    "esbuild": "0.28.2",
+    "tsx": "^4.23.15"
   }
 }

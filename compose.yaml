@@ -1,0 +1,50 @@
+# docker compose up
+#   1. `seed` writes a demo source DB to ./data (stand-in for a customer's data export; skip it with real data)
+#   2. `closeloop` starts the MCP server on stdio with that data mounted READ-ONLY, no network, and a
+#      read-only root filesystem. Engine state lives in the `state` volume.
+# Opt-in LLM: docker compose --profile llm up closeloop-llm  (reads LLM_* from .env, needs network)
+services:
+  seed:
+    build: .
+    image: closeloop-mcp:local
+    command: ["seed", "/data/source.db"]
+    user: "0" # writes to the host bind mount; the server itself runs as uid 10001
+    network_mode: none
+    volumes:
+      - ./data:/data
+
+  closeloop:
+    image: closeloop-mcp:local
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    stdin_open: true # MCP speaks JSON-RPC over stdin/stdout
+    network_mode: none # LLM disabled → no outbound calls are possible
+    read_only: true
+    tmpfs: ["/tmp"]
+    environment:
+      CLOSELOOP_SOURCE_DB: /data/source.db
+      CLOSELOOP_DB: /state/closeloop.db
+    volumes:
+      - ./data:/data:ro
+      - state:/state
+
+  closeloop-llm:
+    profiles: ["llm"]
+    image: closeloop-mcp:local
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    stdin_open: true
+    read_only: true
+    tmpfs: ["/tmp"]
+    env_file: .env # LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_REASONING_EFFORT
+    environment:
+      CLOSELOOP_SOURCE_DB: /data/source.db
+      CLOSELOOP_DB: /state/closeloop-llm.db
+    volumes:
+      - ./data:/data:ro
+      - state:/state
+
+volumes:
+  state:

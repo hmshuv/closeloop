@@ -190,8 +190,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_id, ts);
 `;
 
-export const RECON_SCHEMA =
-  FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n") + RECON_OUTPUT_DDL + AI_AND_AUDIT_DDL + insertOnlyTriggers("audit_log");
+/** Source data: dataset metadata + the insert-only financial tables. */
+export const FINANCIAL_SCHEMA = FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n");
+
+/** Engine state: runs, matches, exceptions, reviews, AI outputs, drafts and the append-only audit log. */
+export const STATE_SCHEMA = RECON_OUTPUT_DDL + AI_AND_AUDIT_DDL + insertOnlyTriggers("audit_log");
+
+export const RECON_SCHEMA = FINANCIAL_SCHEMA + STATE_SCHEMA;
 
 /** Ground truth lives in its own database file. The matcher is never handed this connection. */
 export const TRUTH_SCHEMA = `

@@ -1,4 +1,9 @@
+import { chmodSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.ts";
+import { runReconciliation } from "../src/matcher/run.ts";
 import { openReconDb, openTruthDb, type Db } from "../src/db/open.ts";
 import { FINANCIAL_TABLES } from "../src/db/schema.ts";
 import { generateDataset, type Dataset } from "../src/generator/generate.ts";
@@ -51,5 +56,29 @@ describe("truth database", () => {
   it("round-trips labels and links through zod", () => {
     expect(readTruthLabels(truth)).toEqual(ds.labels);
     expect(readTruthLinks(truth)).toEqual(ds.links);
+  });
+});
+
+describe("read-only source mode", () => {
+  it("reconciles against an attached read-only source and keeps all writes in the state DB", () => {
+    const dir = mkdtempSync(join(tmpdir(), "closeloop-src-"));
+    const sourcePath = join(dir, "source.db");
+    const src = openReconDb(sourcePath);
+    loadDataset(src, null, generateDataset({ seed: 5, payments: 800 }));
+    src.pragma("journal_mode = DELETE");
+    src.close();
+    chmodSync(sourcePath, 0o444);
+
+    const state = openReconDb(join(dir, "state.db"), { sourcePath });
+    const { summary } = runReconciliation(state, loadConfig());
+    expect(summary.matched.payments_settled).toBeGreaterThan(0);
+    expect(count(state, "main.exceptions")).toBeGreaterThan(0);
+    expect(() => state.prepare("INSERT INTO payments (id, order_id, amount_paise, method, status, captured_at) VALUES ('x','o',1,'upi','captured','2026-10-01T10:00:00+05:30')").run()).toThrow(/readonly/);
+    const mainTables = (state.prepare("SELECT name FROM main.sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((r) => r.name);
+    expect(mainTables).not.toContain("payments");
+  });
+
+  it("refuses a missing source database", () => {
+    expect(() => openReconDb(":memory:", { sourcePath: "/nonexistent/source.db" })).toThrow(/not found/);
   });
 });
