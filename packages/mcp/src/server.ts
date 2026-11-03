@@ -323,12 +323,23 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
       const run = await ensureRun(ctx);
       const credit = money(line.credit_paise);
       const matches = db
-        .prepare("SELECT kind, left_id FROM matches WHERE run_id = ? AND right_id = ? AND left_type = 'settlement' AND kind IN ('EXACT','FUZZY','BATCH','BATCH_CONTIGUOUS','HUMAN_APPROVED') ORDER BY left_id")
-        .all(run.id, line.id) as { kind: string; left_id: string }[];
+        .prepare("SELECT kind, left_id, trace_json FROM matches WHERE run_id = ? AND right_id = ? AND left_type = 'settlement' AND kind IN ('EXACT','FUZZY','BATCH','BATCH_CONTIGUOUS','HUMAN_APPROVED') ORDER BY left_id")
+        .all(run.id, line.id) as { kind: string; left_id: string; trace_json: string }[];
       const exc = db
-        .prepare("SELECT id, type, status FROM exceptions WHERE run_id = ? AND primary_id = ? AND type IN ('AMBIGUOUS_BATCH','MATCH_CONFLICT','SUGGESTED_MATCH','UNIDENTIFIED_BANK_CREDIT') ORDER BY type LIMIT 1")
-        .get(run.id, line.id) as { id: string; type: string; status: string } | undefined;
-      const base = { run_id: run.id, bank_line: { id: line.id, txn_date: line.txn_date, narration: line.narration, credit }, candidate_sets: [], exception_id: exc?.id ?? null };
+        .prepare("SELECT id, type, status, trace_json FROM exceptions WHERE run_id = ? AND primary_id = ? AND type IN ('AMBIGUOUS_BATCH','MATCH_CONFLICT','SUGGESTED_MATCH','UNIDENTIFIED_BANK_CREDIT') ORDER BY type LIMIT 1")
+        .get(run.id, line.id) as { id: string; type: string; status: string; trace_json: string } | undefined;
+      // What the exhaustive subset search concluded, from the engine's own trace.
+      const fullSearch = (() => {
+        const first = matches[0];
+        if (first?.kind === "BATCH") return "unique" as const; // the proof came from the full search itself
+        if (first?.kind === "BATCH_CONTIGUOUS") {
+          const v = (JSON.parse(first.trace_json) as { arbitrary_subset_search?: string }).arbitrary_subset_search;
+          return v === "unique" || v === "ambiguous" || v === "none" || v === "budget_exhausted" ? v : "not_checked";
+        }
+        if (exc?.type === "AMBIGUOUS_BATCH") return (JSON.parse(exc.trace_json) as { budget_exhausted?: boolean }).budget_exhausted ? ("budget_exhausted" as const) : ("ambiguous" as const);
+        return null;
+      })();
+      const base = { run_id: run.id, bank_line: { id: line.id, txn_date: line.txn_date, narration: line.narration, credit }, candidate_sets: [], exception_id: exc?.id ?? null, full_search: fullSearch };
 
       if (matches.length > 0) {
         const settlements = settlementsById(matches.map((m) => m.left_id)).sort((a, b) => a.created_at.localeCompare(b.created_at));

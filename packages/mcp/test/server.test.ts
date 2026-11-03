@@ -123,6 +123,7 @@ describe("read tools", () => {
     expect(batch).toMatchObject({ status: "decomposed", match_kind: "BATCH_CONTIGUOUS" });
     expect(batch.settlements_total).toEqual(batch.bank_line.credit);
     expect(batch.assumption).toMatch(/payout model/);
+    expect(batch.full_search).toBe("unique"); // the exhaustive subset search agrees: no other set sums to it
 
     const ambiguous = await ok(ListExceptionsOutput, "list_exceptions", { type: "AMBIGUOUS_BATCH", limit: 1 });
     const line = ambiguous.items[0]?.primary.id;

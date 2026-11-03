@@ -113,6 +113,11 @@ export const DecomposeOutput = z.object({
   status: z.enum(["decomposed", "matched_single_settlement", "human_approved", "ambiguous", "conflict", "suggested", "unidentified"]),
   match_kind: z.string().nullable(),
   assumption: z.string().nullable(),
+  /**
+   * Verdict of the exhaustive arbitrary-subset search for this credit: "unique" means no other set of
+   * unmatched settlements sums to it, so the decomposition is proven without the payout-model assumption.
+   */
+  full_search: z.enum(["unique", "ambiguous", "none", "budget_exhausted", "not_checked"]).nullable(),
   settlements: z.array(SettlementLine),
   settlements_total: Money.nullable(),
   difference_vs_credit: Money.nullable(),
