@@ -4,7 +4,7 @@
 //   node scripts/pack-smoke.mjs --tarball FILE   only install + run an existing tarball
 // Requires `pnpm build` first when packing.
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,7 @@ function checkFiles(files) {
 }
 
 function pack(dest) {
+  mkdirSync(dest, { recursive: true }); // npm pack --pack-destination needs the directory to exist
   const dry = JSON.parse(execFileSync(npm, ["pack", "--dry-run", "--json"], { cwd: pkgDir, encoding: "utf8" }));
   checkFiles(dry[0].files.map((f) => f.path));
   const out = JSON.parse(execFileSync(npm, ["pack", "--json", "--pack-destination", dest], { cwd: pkgDir, encoding: "utf8" }));
