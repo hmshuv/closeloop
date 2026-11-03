@@ -54,7 +54,8 @@ async function installAndRun(tarball) {
   child.stdout.on("data", (d) => (stdout += d));
   child.stderr.on("data", (d) => (stderr += d));
   const send = (m) => child.stdin.write(`${JSON.stringify(m)}\n`);
-  const lines = () => stdout.split("\n").filter((l) => l.trim());
+  // Only complete (newline-terminated) messages: a large response can arrive split across stdout chunks.
+  const lines = () => stdout.split("\n").slice(0, -1).filter((l) => l.trim());
   const response = (id) => lines().map((l) => JSON.parse(l)).find((m) => m.id === id);
   const waitFor = async (id) => {
     for (let i = 0; i < 600; i++) {

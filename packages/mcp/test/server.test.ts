@@ -226,7 +226,9 @@ describe("stdio transport", () => {
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
     child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
     const send = (m: unknown) => child.stdin.write(`${JSON.stringify(m)}\n`);
-    const responded = (id: number) => stdout.split("\n").some((l) => l.includes(`"id":${id}`));
+    // Only complete (newline-terminated) messages: a large response can arrive split across stdout chunks.
+    const complete = () => stdout.split("\n").slice(0, -1).filter((l) => l.trim().length > 0);
+    const responded = (id: number) => complete().some((l) => l.includes(`"id":${id}`));
     const waitFor = async (id: number) => {
       for (let i = 0; i < 300 && !responded(id); i++) await new Promise((r) => setTimeout(r, 100));
     };
@@ -241,7 +243,7 @@ describe("stdio transport", () => {
     await waitFor(3);
     child.kill();
 
-    const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
+    const lines = complete();
     expect(lines.length).toBeGreaterThanOrEqual(4);
     for (const line of lines) expect((JSON.parse(line) as { jsonrpc?: string }).jsonrpc).toBe("2.0");
     expect(stderr).toMatch(/seeding demo data/);
