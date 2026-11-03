@@ -17,10 +17,10 @@ pnpm --filter dashboard build   # static site in apps/dashboard/out/
 3. Set **Root Directory** to `apps/dashboard`. Leave "Include files outside the root directory in the Build Step" enabled (the default): pnpm needs the workspace lockfile at the repo root.
 4. Everything else comes from `apps/dashboard/vercel.json`. If you prefer to set it in the UI instead:
    - **Framework Preset:** Other
-   - **Install Command:** `pnpm install --frozen-lockfile --filter dashboard`
+   - **Install Command:** `pnpm install --frozen-lockfile --filter dashboard --ignore-scripts`
    - **Build Command:** `pnpm build`
    - **Output Directory:** `out`
 5. *(Recommended)* Under **Settings → Environment Variables**, add `ENABLE_EXPERIMENTAL_COREPACK=1`. Vercel then uses the exact pnpm version pinned in the root `package.json` (`packageManager`). No other environment variables are needed, and none should be added: the site needs no secrets.
 6. Click **Deploy**. Later pushes to the default branch redeploy automatically; regenerate the snapshot locally (`pnpm snapshot`), commit it, and push.
 
-The install only pulls the dashboard's dependencies (Next.js, React, Tailwind). The engine, SQLite and the MCP server are not installed or run on Vercel.
+The build only runs the dashboard. pnpm still downloads the workspace root's small dev dependencies, but `--ignore-scripts` skips every native build (SQLite is never compiled), and nothing from the engine or the MCP server runs on Vercel. A "Failed to create bin … closeloop-mcp" warning during install is harmless: that bin only exists after `pnpm build` of the MCP package.
