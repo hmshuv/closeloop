@@ -20,7 +20,7 @@ export default tseslint.config(
     rules: { "no-console": ["error", { allow: ["error"] }] },
   },
   {
-    files: ["eslint.config.js"],
+    files: ["eslint.config.js", "packages/*/bin/*.js"],
     ...tseslint.configs.disableTypeChecked,
   },
 );

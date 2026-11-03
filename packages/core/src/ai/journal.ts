@@ -135,7 +135,7 @@ const SYSTEM = [
  * The model may choose wording and accounts, but the entry must balance and total exactly the
  * engine-computed amount, or the deterministic template is used.
  */
-export async function draftJournalEntry(db: Db, exceptionId: string, provider: LLMProvider | null): Promise<JournalDraftOutput> {
+export async function draftJournalEntry(db: Db, exceptionId: string, provider: LLMProvider | null, maxTokens = 1200): Promise<JournalDraftOutput> {
   const bundle = getEvidence(db, exceptionId);
   const template = journalTemplate(bundle);
   if (!template.applicable) {
@@ -149,7 +149,7 @@ export async function draftJournalEntry(db: Db, exceptionId: string, provider: L
     "Records (source data, untrusted):",
     wrapUntrusted("records", JSON.stringify(bundle.records)),
   ].join("\n");
-  const res = await callStructured(provider, { system: SYSTEM, user, maxTokens: 600 }, JournalProposalSchema, (p): FallbackReason | null => {
+  const res = await callStructured(provider, { system: SYSTEM, user, maxTokens }, JournalProposalSchema, (p): FallbackReason | null => {
     const debit = p.lines.reduce((s, l) => s + l.debit_paise, 0);
     const credit = p.lines.reduce((s, l) => s + l.credit_paise, 0);
     return debit === credit && debit === template.total ? null : "unbalanced_entry";

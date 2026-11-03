@@ -6,6 +6,8 @@ export interface OpenAICompatibleOptions {
   apiKey: string;
   model: string;
   timeoutMs?: number;
+  /** Sent as `reasoning_effort` when set (reasoning models such as gpt-oss on Groq). */
+  reasoningEffort?: string;
   /** Upper bound on the single 429 retry wait. */
   maxRetryAfterMs?: number;
   fetch?: typeof fetch;
@@ -75,6 +77,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         { role: "user", content: request.user },
       ],
       ...(json ? { response_format: { type: "json_object" } } : {}),
+      ...(this.opts.reasoningEffort ? { reasoning_effort: this.opts.reasoningEffort } : {}),
     });
 
     let useJson = Boolean(request.json) && this.jsonMode;
@@ -89,6 +92,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
       if (res.status === 400 && useJson) {
         const text = await res.text().catch(() => "");
+        // Groq: the model's output failed JSON validation (e.g. empty after reasoning). That's a bad answer, not a bad request.
+        if (/json_validate_failed/i.test(text)) throw new LLMError("malformed_json", "provider rejected the model's JSON output");
         if (/response_format|json_object|json mode/i.test(text)) {
           this.jsonMode = false; // this provider/model doesn't support JSON mode; extract JSON from text instead
           useJson = false;
@@ -112,8 +117,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
 }
 
 /** Returns a provider only when LLM_BASE_URL, LLM_API_KEY and LLM_MODEL are all set. */
-export function providerFromEnv(env: NodeJS.ProcessEnv = process.env): OpenAICompatibleProvider | null {
-  const { LLM_BASE_URL: baseUrl, LLM_API_KEY: apiKey, LLM_MODEL: model } = env;
+export function providerFromEnv(env: NodeJS.ProcessEnv = process.env, timeoutMs?: number): OpenAICompatibleProvider | null {
+  const { LLM_BASE_URL: baseUrl, LLM_API_KEY: apiKey, LLM_MODEL: model, LLM_REASONING_EFFORT: reasoningEffort } = env;
   if (!baseUrl || !apiKey || !model) return null;
-  return new OpenAICompatibleProvider({ baseUrl, apiKey, model });
+  return new OpenAICompatibleProvider({ baseUrl, apiKey, model, timeoutMs, ...(reasoningEffort ? { reasoningEffort } : {}) });
 }

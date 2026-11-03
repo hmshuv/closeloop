@@ -16,6 +16,7 @@ export { loadSource, datasetMeta } from "./matcher/load.ts";
 export { EXPOSURE_BY_TYPE, exposureClassOf, summarizeExposure, type ExposureSummary } from "./matcher/exposure.ts";
 export { findSubsetsWithSum, type SubsetSumResult, type SubsetSumOptions } from "./matcher/subsetsum.ts";
 export { computeTieOut, type TieOut } from "./matcher/tieout.ts";
+export { CONTIGUITY_ASSUMPTION } from "./matcher/stage2-batch.ts";
 export * from "./matcher/types.ts";
 export { approveBatchCandidate, type ApproveBatchResult, type LeftoverOutcome } from "./review/batch.ts";
 export { getEvidence, EvidenceBundleSchema, type EvidenceBundle } from "./review/evidence.ts";
@@ -28,4 +29,6 @@ export { draftJournalEntry, journalTemplate, CHART_OF_ACCOUNTS, JournalDraftOutp
 export { runReconciliationWithAI } from "./ai/run.ts";
 export { extractJsonObject } from "./ai/json.ts";
 export { wrapUntrusted, UNTRUSTED_PREAMBLE } from "./ai/untrusted.ts";
+export { approveSuggestion, escalateException, suggestionCandidates, conflictsInvolving, loadException, type ApproveSuggestionResult } from "./review/suggestion.ts";
+export { latestRun, showcaseCases, type RunInfo, type ShowcaseCases } from "./review/runs.ts";
 // Ground-truth readers are deliberately NOT exported here; eval imports them from "@closeloop/core/truth".

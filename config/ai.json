@@ -1,0 +1,7 @@
+{
+  "note": "LLM budgets. Free tiers are small (e.g. Groq ~8k tokens/minute), so narration parsing is sequential and capped per run.",
+  "timeout_ms": 20000,
+  "narration": { "max_calls_per_run": 8, "concurrency": 1, "max_tokens": 600 },
+  "explanation": { "max_tokens": 1500 },
+  "journal": { "max_tokens": 1200 }
+}

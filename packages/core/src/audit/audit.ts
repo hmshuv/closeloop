@@ -49,11 +49,11 @@ export function appendAudit(db: Db, event: AuditInput): string {
 }
 
 /** Oldest first. With an entity id, returns events about that entity or that mention it in their payload links. */
-export function getAuditTrail(db: Db, entityId?: string, limit = 200): AuditEvent[] {
+export function getAuditTrail(db: Db, entityId?: string, limit = 200, offset = 0): AuditEvent[] {
   const rows = (
     entityId
-      ? db.prepare("SELECT * FROM audit_log WHERE entity_id = ? OR instr(payload_json, ?) > 0 ORDER BY ts, rowid LIMIT ?").all(entityId, `"${entityId}"`, limit)
-      : db.prepare("SELECT * FROM audit_log ORDER BY ts, rowid LIMIT ?").all(limit)
+      ? db.prepare("SELECT * FROM audit_log WHERE entity_id = ? OR instr(payload_json, ?) > 0 ORDER BY ts, rowid LIMIT ? OFFSET ?").all(entityId, `"${entityId}"`, limit, offset)
+      : db.prepare("SELECT * FROM audit_log ORDER BY ts, rowid LIMIT ? OFFSET ?").all(limit, offset)
   ) as { id: string; ts: string; actor: string; action: string; entity_type: string; entity_id: string; payload_json: string }[];
   return rows.map(({ payload_json, ...r }) => AuditEventSchema.parse({ ...r, payload: JSON.parse(payload_json) as unknown }));
 }

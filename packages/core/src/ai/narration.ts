@@ -35,8 +35,8 @@ const SYSTEM = [
   "channel is one of NEFT, RTGS, IMPS, UPI, OTHER. Copy values exactly as they appear in the narration; never invent or correct them.",
 ].join(" ");
 
-export async function parseNarration(narration: string, provider: LLMProvider | null): Promise<NarrationParse> {
-  const res = await callStructured(provider, { system: SYSTEM, user: `Parse this bank narration:\n${wrapUntrusted("bank_narration", narration)}`, maxTokens: 200 }, NarrationFieldsSchema);
+export async function parseNarration(narration: string, provider: LLMProvider | null, maxTokens = 600): Promise<NarrationParse> {
+  const res = await callStructured(provider, { system: SYSTEM, user: `Parse this bank narration:\n${wrapUntrusted("bank_narration", narration)}`, maxTokens }, NarrationFieldsSchema);
   if (res.ok) return { ...res.value, source: "llm", fallback_reason: null, model: res.model };
   return { ...deterministicNarrationParse(narration), source: "deterministic_fallback", fallback_reason: res.reason, model: null };
 }
@@ -48,6 +48,8 @@ export interface NarrationUsage {
   fallback: Record<string, number>;
   hints_offered: number;
   hints_grounded: number;
+  /** Candidates not sent to the model because the per-run call budget was spent. */
+  skipped_over_budget: number;
 }
 
 /**
@@ -60,8 +62,8 @@ export async function narrationHints(
   src: SourceData,
   provider: LLMProvider | null,
   cfg: CloseLoopConfig,
-  concurrency = 4,
 ): Promise<{ tokens: Map<string, string[]>; usage: NarrationUsage }> {
+  const { concurrency, max_calls_per_run: budget, max_tokens: maxTokens } = cfg.ai.narration;
   const f = cfg.matching.fuzzy;
   const utrs = new Set(src.settlements.map((s) => normalizeUtrText(s.utr)));
   const lengths = [...new Set([...utrs].map((u) => u.length))];
@@ -70,7 +72,8 @@ export async function narrationHints(
     return lengths.some((len) => Array.from({ length: Math.max(0, text.length - len + 1) }, (_, i) => text.slice(i, i + len)).some((t) => utrs.has(t)));
   };
   const candidates = src.bankLines.filter((l) => l.credit_paise > 0 && !hasExact(l.narration));
-  const usage: NarrationUsage = { candidates: candidates.length, llm: 0, cached: 0, fallback: {}, hints_offered: 0, hints_grounded: 0 };
+  const usage: NarrationUsage = { candidates: candidates.length, llm: 0, cached: 0, fallback: {}, hints_offered: 0, hints_grounded: 0, skipped_over_budget: 0 };
+  let calls = 0;
   const tokens = new Map<string, string[]>();
   if (!provider) {
     // Nothing to ask: record the reason once instead of once per narration.
@@ -94,7 +97,12 @@ export async function narrationHints(
         usage.cached++;
         parsed = { ...NarrationFieldsSchema.parse(JSON.parse(hit.payload_json)), source: "llm", fallback_reason: null, model: null };
       } else {
-        parsed = await parseNarration(line.narration, provider);
+        if (calls >= budget) {
+          usage.skipped_over_budget++;
+          continue;
+        }
+        calls++;
+        parsed = await parseNarration(line.narration, provider, maxTokens);
         cachePut?.run(randomUUID(), key, parsed.source, parsed.fallback_reason, parsed.model, JSON.stringify(NarrationFieldsSchema.parse(parsed)), new Date().toISOString());
       }
       if (parsed.source === "llm") {

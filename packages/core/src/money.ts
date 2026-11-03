@@ -55,6 +55,23 @@ export function sumPaise(values: Iterable<Paise>): Paise {
   return assertPaise(total, "sum");
 }
 
+/**
+ * Deep copy that adds `<name>_inr` next to every integer `<name>_paise` field (e.g. credit_paise → credit_inr),
+ * so consumers — people and models — quote pre-formatted amounts instead of converting or adding paise.
+ */
+export function withInr(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withInr);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = withInr(v);
+      if (k.endsWith("_paise") && Number.isSafeInteger(v)) out[`${k.slice(0, -"_paise".length)}_inr`] = formatINR(v as number);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** Indian digit grouping: 12345678 paise → "₹1,23,456.78". */
 export function formatINR(amount: Paise): string {
   assertPaise(amount);

@@ -82,6 +82,15 @@ export const GeneratorConfigSchema = z.object({
   noise_rates: z.record(NoiseKindSchema, Rate),
 });
 
+export const AiConfigSchema = z.object({
+  note: z.string().optional(),
+  timeout_ms: z.number().int().positive(),
+  narration: z.object({ max_calls_per_run: z.number().int().nonnegative(), concurrency: z.number().int().positive(), max_tokens: z.number().int().positive() }),
+  explanation: z.object({ max_tokens: z.number().int().positive() }),
+  journal: z.object({ max_tokens: z.number().int().positive() }),
+});
+
+export type AiConfig = z.infer<typeof AiConfigSchema>;
 export type WindowsConfig = z.infer<typeof WindowsConfigSchema>;
 export type FeesConfig = z.infer<typeof FeesConfigSchema>;
 export type MatchingConfig = z.infer<typeof MatchingConfigSchema>;
@@ -92,6 +101,7 @@ export interface CloseLoopConfig {
   fees: FeesConfig;
   matching: MatchingConfig;
   generator: GeneratorConfig;
+  ai: AiConfig;
   calendar: BankCalendar;
 }
 
@@ -114,6 +124,7 @@ export function loadConfig(dir: string = defaultConfigDir()): CloseLoopConfig {
     fees: readJson(dir, "fees.json", FeesConfigSchema),
     matching: readJson(dir, "matching.json", MatchingConfigSchema),
     generator: readJson(dir, "generator.json", GeneratorConfigSchema),
+    ai: readJson(dir, "ai.json", AiConfigSchema),
     calendar: {
       secondAndFourthSaturdayOff: windows.calendar.second_and_fourth_saturday_off,
       holidays: new Set(windows.calendar.holidays.map((h) => h.date)),

@@ -12,8 +12,8 @@ import {
   loadDataset,
   openReconDb,
   runReconciliation,
+  showcaseCases,
   type BankLine,
-  type MatchDraft,
   type Settlement,
 } from "@closeloop/core";
 
@@ -26,11 +26,12 @@ const cfg = loadConfig();
 const ds = generateDataset({ seed: SEED, payments: PAYMENTS, config: cfg });
 const db = openReconDb(":memory:");
 loadDataset(db, null, ds);
-const { result } = runReconciliation(db, cfg, { from: FROM, to: TO });
+const { result, summary } = runReconciliation(db, cfg, { from: FROM, to: TO });
+// Same selection the month_end_review MCP prompt uses.
+const picks = showcaseCases(db, summary.run_id, FROM, TO);
 
 const lines = new Map(ds.bankLines.map((l) => [l.id, l]));
 const settlements = new Map(ds.settlements.map((s) => [s.id, s]));
-const inOctober = (d: string) => d >= FROM && d <= TO;
 const line = (id: string) => lines.get(id) as BankLine;
 const stl = (id: string) => settlements.get(id) as Settlement;
 const settlementRows = (ids: string[]) =>
@@ -38,21 +39,18 @@ const settlementRows = (ids: string[]) =>
 const lineBlock = (l: BankLine) => `- Bank line \`${l.id}\` · ${l.txn_date} · credit **${formatINR(l.credit_paise)}**\n- Narration: \`${l.narration}\``;
 
 // 1. Largest contiguous batch credit in October (by number of settlements, then amount).
-const byCredit = new Map<string, MatchDraft[]>();
-for (const m of result.matches) if (m.kind === "BATCH_CONTIGUOUS" && inOctober(m.anchor_date)) byCredit.set(m.right.id, [...(byCredit.get(m.right.id) ?? []), m]);
-const [batchLineId, batchMatches] = [...byCredit].sort((x, y) => y[1].length - x[1].length || line(y[0]).credit_paise - line(x[0]).credit_paise)[0] ?? [];
-if (!batchLineId || !batchMatches) throw new Error("No contiguous batch credit in October");
+const batchLineId = picks.largestContiguousBatch?.bank_line_id;
+const batchMatches = result.matches.filter((m) => m.kind === "BATCH_CONTIGUOUS" && m.right.id === batchLineId);
+if (!batchLineId || batchMatches.length === 0) throw new Error("No contiguous batch credit in October");
 
 // 2. A fuzzy auto-match in October (prefer a genuine edit-distance-1 typo).
-const fuzzy = result.matches
-  .filter((m) => m.kind === "FUZZY" && inOctober(m.anchor_date))
-  .sort((x, y) => Number((y.trace.best as { distance: number }).distance === 1) - Number((x.trace.best as { distance: number }).distance === 1) || x.anchor_date.localeCompare(y.anchor_date))[0];
+const fuzzy = result.matches.find((m) => m.kind === "FUZZY" && m.right.id === picks.fuzzyMatch?.bank_line_id);
 if (!fuzzy) throw new Error("No fuzzy match in October");
 const fuzzyBest = fuzzy.trace.best as { token: string; distance: number; confidence: number };
 const fuzzyRunner = fuzzy.trace.runner_up as { settlement_id: string; distance: number | null } | null;
 
 // 3. A MATCH_CONFLICT in October.
-const conflict = result.exceptions.find((e) => e.type === "MATCH_CONFLICT" && inOctober(e.anchor_date));
+const conflict = result.exceptions.find((e) => e.type === "MATCH_CONFLICT" && e.primary.id === picks.matchConflict?.bank_line_id);
 if (!conflict) throw new Error("No MATCH_CONFLICT in October");
 const ct = z
   .object({ batch_settlement_ids: z.array(z.string()), conflicting_settlement_ids: z.array(z.string()), suggested_on_bank_lines: z.array(z.string()) })
