@@ -1,0 +1,174 @@
+{
+  "generated_at": "2026-11-03T10:04:29.188Z",
+  "commit": "4abae61-dirty",
+  "command": "pnpm eval",
+  "seeds_used": [
+    101,
+    202,
+    303,
+    404,
+    505,
+    606,
+    707,
+    808
+  ],
+  "payments_per_dataset": 25000,
+  "days": 45,
+  "runtime_s": 9.5,
+  "coverage_met": true,
+  "dev": {
+    "credits": [
+      6733,
+      7185
+    ],
+    "fuzzy": [
+      328,
+      328
+    ],
+    "batch": [
+      204,
+      232
+    ],
+    "batchContiguous": [
+      169,
+      169
+    ],
+    "batchNonContiguous": [
+      35,
+      63
+    ],
+    "batchAmbiguous": [
+      28,
+      232
+    ],
+    "wrongLinks": 2,
+    "missing": {
+      "n": 96,
+      "detected": 26,
+      "deferred": 70,
+      "missed": 0
+    },
+    "macroRecall": 0.9334261133603239,
+    "macroPrecision": 0.9685897435897436,
+    "recordsPerSecond": 100234.76716603692
+  },
+  "heldout": {
+    "credits": [
+      1328,
+      1467
+    ],
+    "fuzzy": [
+      352,
+      352
+    ],
+    "batch": [
+      32,
+      42
+    ],
+    "batchContiguous": [
+      22,
+      22
+    ],
+    "batchNonContiguous": [
+      10,
+      20
+    ],
+    "batchAmbiguous": [
+      10,
+      42
+    ],
+    "wrongLinks": 1,
+    "missing": {
+      "n": 19,
+      "detected": 3,
+      "deferred": 16,
+      "missed": 0
+    },
+    "macroRecall": 0.91751012145749,
+    "macroPrecision": 0.9412587412587412,
+    "recordsPerSecond": 118947.33706984452
+  },
+  "batch_by_volume": [
+    {
+      "payments": 5000,
+      "payments_per_day": 111,
+      "max_pool": 16,
+      "outcomes": {
+        "contiguous": {
+          "correct_contiguous": 11,
+          "correct_subset": 0,
+          "wrong_set": 0,
+          "ambiguous": 0,
+          "conflict": 0,
+          "suggested": 0,
+          "unidentified": 0,
+          "other": 0
+        },
+        "non_contiguous": {
+          "correct_contiguous": 2,
+          "correct_subset": 4,
+          "wrong_set": 0,
+          "ambiguous": 0,
+          "conflict": 0,
+          "suggested": 0,
+          "unidentified": 0,
+          "other": 0
+        }
+      }
+    },
+    {
+      "payments": 12500,
+      "payments_per_day": 278,
+      "max_pool": 33,
+      "outcomes": {
+        "contiguous": {
+          "correct_contiguous": 25,
+          "correct_subset": 0,
+          "wrong_set": 0,
+          "ambiguous": 0,
+          "conflict": 0,
+          "suggested": 0,
+          "unidentified": 0,
+          "other": 0
+        },
+        "non_contiguous": {
+          "correct_contiguous": 0,
+          "correct_subset": 10,
+          "wrong_set": 0,
+          "ambiguous": 1,
+          "conflict": 0,
+          "suggested": 0,
+          "unidentified": 0,
+          "other": 0
+        }
+      }
+    },
+    {
+      "payments": 25000,
+      "payments_per_day": 556,
+      "max_pool": 56,
+      "outcomes": {
+        "contiguous": {
+          "correct_contiguous": 42,
+          "correct_subset": 0,
+          "wrong_set": 0,
+          "ambiguous": 0,
+          "conflict": 0,
+          "suggested": 0,
+          "unidentified": 0,
+          "other": 0
+        },
+        "non_contiguous": {
+          "correct_contiguous": 0,
+          "correct_subset": 8,
+          "wrong_set": 0,
+          "ambiguous": 13,
+          "conflict": 0,
+          "suggested": 0,
+          "unidentified": 0,
+          "other": 0
+        }
+      }
+    }
+  ]
+}

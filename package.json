@@ -7,7 +7,7 @@
     "node": ">=20.12"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter dashboard typecheck",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,7 +17,10 @@
     "eval": "tsx scripts/eval.ts",
     "build": "pnpm --filter closeloop-mcp build",
     "mcp:dev": "node packages/mcp/bin/dev.js",
-    "pack:smoke": "node scripts/pack-smoke.mjs"
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "snapshot": "tsx scripts/snapshot.ts",
+    "dashboard:dev": "pnpm --filter dashboard dev",
+    "dashboard:build": "pnpm --filter dashboard build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -27,7 +30,8 @@
     "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@modelcontextprotocol/sdk": "^1.32.2"
   },
   "dependencies": {
     "@closeloop/core": "workspace:*",

@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "coverage/**", "packages/mcp/config/**"] },
+  { ignores: ["**/dist/**", "**/node_modules/**", "**/.next/**", "**/out/**", "**/next-env.d.ts", "coverage/**", "packages/mcp/config/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

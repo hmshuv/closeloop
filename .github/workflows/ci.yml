@@ -21,6 +21,10 @@ jobs:
       - run: pnpm test
       - name: Eval smoke (5k payments per seed; the full 25k eval runs locally and writes EVAL.md)
         run: pnpm eval --payments 5000
+      - name: Dashboard static build (reads only the committed snapshot)
+        run: pnpm --filter dashboard build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
 
   package:
     name: build + pack (file-list check)
