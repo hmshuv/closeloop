@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-# Build the same npm package that gets published, then install it into a slim runtime image.
+# Build the same npm package that gets published, then install it into a slim runtime image. SQLite is
+# Node's built-in node:sqlite (Node 22.13+), so there is no native module and no compiler in either stage.
 FROM node:22-bookworm-slim AS build
 WORKDIR /src
 RUN corepack enable
@@ -14,7 +15,7 @@ FROM node:22-bookworm-slim
 ENV NODE_ENV=production \
     CLOSELOOP_DB=/state/closeloop.db
 COPY --from=build /out/closeloop-mcp-*.tgz /tmp/
-RUN npm install -g /tmp/closeloop-mcp-*.tgz --no-audit --no-fund && rm /tmp/*.tgz && npm cache clean --force \
+RUN npm install -g /tmp/closeloop-mcp-*.tgz --ignore-scripts --no-audit --no-fund && rm /tmp/*.tgz && npm cache clean --force \
  && useradd --create-home --uid 10001 closeloop && mkdir -p /state /data && chown closeloop /state
 USER closeloop
 WORKDIR /home/closeloop

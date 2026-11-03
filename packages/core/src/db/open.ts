@@ -1,10 +1,10 @@
-import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { FINANCIAL_TABLES, RECON_SCHEMA, STATE_SCHEMA, TRUTH_SCHEMA } from "./schema.ts";
+import { Database } from "./sqlite.ts";
 
-export type Db = Database.Database;
+export type Db = Database;
 
 function open(path: string, schema: string): Db {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });

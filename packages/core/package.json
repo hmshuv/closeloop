@@ -9,7 +9,6 @@
     "./eval": "./src/eval/index.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
     "zod": "^3.25.0"
   }
 }

@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CLOSELOOP_VERSION } from "../src/index.ts";
@@ -8,8 +8,8 @@ describe("toolchain smoke test", () => {
     expect(CLOSELOOP_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it("opens an in-memory SQLite database via the native binding", () => {
-    const db = new Database(":memory:");
+  it("opens an in-memory SQLite database via the built-in node:sqlite (no native binding)", () => {
+    const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE t (paise INTEGER NOT NULL)");
     db.prepare("INSERT INTO t (paise) VALUES (?)").run(123_456);
     const row = db.prepare("SELECT paise FROM t").get() as { paise: number };

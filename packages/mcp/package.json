@@ -1,6 +1,6 @@
 {
   "name": "closeloop-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for month-end reconciliation of Razorpay-style gateway settlements against the bank statement and the ledger. Deterministic matching (exact, fuzzy UTR, batch decomposition) with a constrained AI layer.",
   "type": "module",
   "license": "MIT",
@@ -10,8 +10,6 @@
     "url": "git+https://github.com/hmshuv/closeloop.git",
     "directory": "packages/mcp"
   },
-
-  
   "homepage": "https://github.com/hmshuv/closeloop#readme",
   "bugs": {
     "url": "https://github.com/hmshuv/closeloop/issues"
@@ -36,7 +34,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -45,7 +43,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "better-sqlite3": "^11.10.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -18,4 +18,4 @@ Environment:
 - `CLOSELOOP_SOURCE_DB`: your financial data, attached read-only.
 - `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_REASONING_EFFORT`: optional; any OpenAI-compatible endpoint. Without them the server makes no outbound network calls.
 
-Requires Node 20.12+. Full documentation, evaluation and design notes are in the project repository.
+Requires Node 22.13+ (uses the built-in `node:sqlite`; no native modules, nothing compiled on install). Full documentation, evaluation and design notes are in the project repository.

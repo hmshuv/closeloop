@@ -1,4 +1,5 @@
-// Clean-install test for the npm package (better-sqlite3 is native, so this must work from scratch).
+// Clean-install test for the npm package. It installs with --ignore-scripts: SQLite is the built-in
+// node:sqlite, so the package must start with no install or build step at all.
 //   node scripts/pack-smoke.mjs                  pack packages/mcp, then install + run it in an empty temp dir
 //   node scripts/pack-smoke.mjs --pack-only DIR  only pack (after the file-list check) into DIR
 //   node scripts/pack-smoke.mjs --tarball FILE   only install + run an existing tarball
@@ -31,21 +32,24 @@ function checkFiles(files) {
   console.log(`pack-smoke: package contents OK (${files.length} files): ${files.join(", ")}`);
 }
 
+/** `npm pack --json` is an array up to npm 11 and an object keyed by package name from npm 12. */
+const packed = (json) => (Array.isArray(json) ? json[0] : Object.values(json)[0]);
+
 function pack(dest) {
   mkdirSync(dest, { recursive: true }); // npm pack --pack-destination needs the directory to exist
-  const dry = JSON.parse(execFileSync(npm, ["pack", "--dry-run", "--json"], { cwd: pkgDir, encoding: "utf8" }));
-  checkFiles(dry[0].files.map((f) => f.path));
-  const out = JSON.parse(execFileSync(npm, ["pack", "--json", "--pack-destination", dest], { cwd: pkgDir, encoding: "utf8" }));
-  const tarball = join(dest, out[0].filename);
-  console.log(`pack-smoke: packed ${tarball} (${out[0].size} bytes)`);
+  const dry = packed(JSON.parse(execFileSync(npm, ["pack", "--dry-run", "--json"], { cwd: pkgDir, encoding: "utf8" })));
+  checkFiles(dry.files.map((f) => f.path));
+  const out = packed(JSON.parse(execFileSync(npm, ["pack", "--json", "--pack-destination", dest], { cwd: pkgDir, encoding: "utf8" })));
+  const tarball = join(dest, out.filename);
+  console.log(`pack-smoke: packed ${tarball} (${out.size} bytes)`);
   return tarball;
 }
 
 async function installAndRun(tarball) {
   const app = mkdtempSync(join(tmpdir(), "closeloop-clean-"));
   writeFileSync(join(app, "package.json"), JSON.stringify({ name: "clean-install-test", private: true }));
-  execFileSync(npm, ["install", resolve(tarball), "--no-audit", "--no-fund", "--loglevel=error"], { cwd: app, stdio: "inherit" });
-  console.log(`pack-smoke: installed into ${app} (no repo, fresh node_modules)`);
+  execFileSync(npm, ["install", resolve(tarball), "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], { cwd: app, stdio: "inherit" });
+  console.log(`pack-smoke: installed into ${app} (no repo, fresh node_modules, --ignore-scripts)`);
 
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LLM_") && !k.startsWith("CLOSELOOP_")));
   const child = spawn(npx, ["--no-install", "closeloop-mcp"], { cwd: app, env: { ...env, HOME: app, USERPROFILE: app, CLOSELOOP_DB: join(app, "state.db") }, stdio: ["pipe", "pipe", "pipe"] });

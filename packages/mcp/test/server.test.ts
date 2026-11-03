@@ -220,7 +220,8 @@ describe("stdio transport", () => {
   it("writes only JSON-RPC to stdout; logs go to stderr", async () => {
     const home = mkdtempSync(join(tmpdir(), "closeloop-mcp-"));
     const bin = fileURLToPath(new URL("../bin/dev.js", import.meta.url));
-    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LLM_")));
+    // NODE_NO_WARNINGS is dropped so node:sqlite's ExperimentalWarning (where Node emits one) is really printed.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LLM_") && k !== "NODE_NO_WARNINGS"));
     const child = spawn(process.execPath, [bin], { cwd: home, env: { ...env, HOME: home, CLOSELOOP_DB: join(home, "closeloop.db") }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -250,5 +251,6 @@ describe("stdio transport", () => {
     expect(stderr).toMatch(/seeding demo data/);
     expect(stderr).toMatch(/ready/);
     expect(stdout).not.toMatch(/seeding|\[closeloop-mcp\]/);
+    expect(stdout).not.toMatch(/ExperimentalWarning|experimental feature/);
   }, 60_000);
 });

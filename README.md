@@ -41,11 +41,13 @@ flowchart LR
 
 ## Try it in 60 seconds
 
+Requires **Node 22.13+** (22 LTS or 24). SQLite is Node's built-in `node:sqlite`, so there are no native modules and nothing is compiled on install.
+
 ```bash
 npx -y closeloop-mcp check   # seeds a demo dataset, reconciles it, prints the summary
 ```
 
-Until the package is on npm, run it from a clone: `pnpm install && pnpm build && npx closeloop-mcp check`.
+From a clone: `pnpm install && pnpm build && npx closeloop-mcp check`.
 
 Add it to Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`), then restart Claude Desktop:
 
@@ -200,6 +202,8 @@ Running the AI layer against a real free-tier provider (Groq, `openai/gpt-oss-12
 - **The dashboard is a static snapshot.** Approvals and escalations happen in the MCP agent, not on the site.
 
 ## Development
+
+Requires Node 22.13+ and pnpm (the version is pinned in `packageManager`; `corepack enable` picks it up).
 
 ```bash
 pnpm install

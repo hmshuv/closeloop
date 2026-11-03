@@ -21,7 +21,7 @@ MCP-native reconciliation agent for Indian finance teams. Spec: `SPEC.md`. Desig
 - Tests required for every behaviour change (vitest, `packages/*/test`).
 - Before committing: `pnpm typecheck && pnpm lint && pnpm test` must be green.
 - Work one phase at a time (see `PLAN.md`); stop for review after each phase.
-- Ask before adding dependencies beyond: typescript, better-sqlite3, zod, vitest, @modelcontextprotocol/sdk, eslint, typescript-eslint, tsx, @types/*, and (Phase 6) Next.js + Tailwind.
+- Ask before adding dependencies beyond: typescript, zod, vitest, @modelcontextprotocol/sdk, eslint, typescript-eslint, tsx, @types/*, and (Phase 6) Next.js + Tailwind.
 
 ## Style
 - Simple, readable code over clever abstractions. Comment only where finance logic is non-obvious.

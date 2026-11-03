@@ -136,7 +136,7 @@ export function settlementWindow(cfg: CloseLoopConfig, method: PaymentMethod): n
   return cfg.windows.settlement_windows_business_days[method];
 }
 
-/** Loads `.env` from the working directory if present (Node ≥ 20.12 built-in; no dotenv dependency). */
+/** Loads `.env` from the working directory if present (Node built-in; no dotenv dependency). */
 export function loadEnvFile(path = ".env"): void {
   if (existsSync(path)) process.loadEnvFile(path);
 }

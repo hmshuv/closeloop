@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.22.0",
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22.13"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter dashboard typecheck",
@@ -24,18 +24,17 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^20.19.43",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@types/node": "^22.20.5",
     "eslint": "^10.14.0",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vitest": "^5.0.5",
-    "@modelcontextprotocol/sdk": "^1.32.2"
+    "vitest": "^5.0.5"
   },
   "dependencies": {
     "@closeloop/core": "workspace:*",
-    "zod": "^3.25.76",
-    "closeloop-mcp": "workspace:*"
+    "closeloop-mcp": "workspace:*",
+    "zod": "^3.25.76"
   }
 }
