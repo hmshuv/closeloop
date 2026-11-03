@@ -20,14 +20,20 @@ export interface Stage2Result extends StageResult {
 }
 
 /** Stage 2: settlement ↔ bank credit. Order: exact UTR → fuzzy UTR → batch decomposition. */
-export function stage2Bank(src: SourceData, cfg: CloseLoopConfig, now?: () => number): Stage2Result {
+export interface Stage2Options {
+  now?: () => number;
+  /** Bank line id → extra candidate UTR tokens (e.g. from AI narration parsing). Only grounded ones are used. */
+  extraTokens?: ReadonlyMap<string, readonly string[]>;
+}
+
+export function stage2Bank(src: SourceData, cfg: CloseLoopConfig, opts: Stage2Options = {}): Stage2Result {
   const state = newBankState(
     src.bankLines.filter((l) => l.credit_paise > 0),
     src.settlements,
   );
   const exact = stage2Exact(state, cfg);
-  const fuzzy = stage2Fuzzy(state, cfg);
-  const batch = stage2Batch(state, cfg, now);
+  const fuzzy = stage2Fuzzy(state, cfg, opts.extraTokens);
+  const batch = stage2Batch(state, cfg, opts.now);
   const result: Stage2Result = {
     matches: [...exact.matches, ...fuzzy.matches, ...batch.matches],
     exceptions: [...exact.exceptions, ...fuzzy.exceptions, ...batch.exceptions],

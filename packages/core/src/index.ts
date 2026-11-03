@@ -18,4 +18,14 @@ export { findSubsetsWithSum, type SubsetSumResult, type SubsetSumOptions } from 
 export { computeTieOut, type TieOut } from "./matcher/tieout.ts";
 export * from "./matcher/types.ts";
 export { approveBatchCandidate, type ApproveBatchResult, type LeftoverOutcome } from "./review/batch.ts";
+export { getEvidence, EvidenceBundleSchema, type EvidenceBundle } from "./review/evidence.ts";
+export { appendAudit, getAuditTrail, AuditEventSchema, ACTORS, type AuditEvent, type Actor, type AuditAction } from "./audit/audit.ts";
+export { LLMError, type LLMProvider, type LLMRequest, type FallbackReason, type Source } from "./ai/provider.ts";
+export { OpenAICompatibleProvider, providerFromEnv, retryAfterMs, type OpenAICompatibleOptions } from "./ai/openai-compatible.ts";
+export { parseNarration, deterministicNarrationParse, narrationHints, NarrationFieldsSchema, type NarrationParse, type NarrationUsage } from "./ai/narration.ts";
+export { explainException, deterministicExplanation, reviewRequired, ExplanationSchema, ExplanationOutputSchema, type ExplanationOutput } from "./ai/explain.ts";
+export { draftJournalEntry, journalTemplate, CHART_OF_ACCOUNTS, JournalDraftOutputSchema, type JournalDraftOutput } from "./ai/journal.ts";
+export { runReconciliationWithAI } from "./ai/run.ts";
+export { extractJsonObject } from "./ai/json.ts";
+export { wrapUntrusted, UNTRUSTED_PREAMBLE } from "./ai/untrusted.ts";
 // Ground-truth readers are deliberately NOT exported here; eval imports them from "@closeloop/core/truth".

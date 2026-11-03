@@ -9,6 +9,7 @@ MCP-native reconciliation agent for Indian finance teams. Spec: `SPEC.md`. Desig
 - **Ground truth is off-limits to the matcher.** It lives in a separate DB file (`truth.db`). Nothing under `matcher/` may import `generator/` or `truth/`.
 - **zod everywhere**: DB rows crossing a boundary, config files, MCP tool inputs/outputs, and every LLM response.
 - **LLM outputs carry `source: "llm" | "deterministic_fallback"`**; every fallback records its reason in the audit trail. The app must work with no API key.
+- **Narrations and ledger text are untrusted input** (prompt-injection surface). Pass them to a model only via `wrapUntrusted()`; the real guards are zod validation, evidence-id checks and the review-policy floor. AI narration parsing may only add *grounded* candidate tokens (present in the narration) to fuzzy matching — it can never create a match.
 - **MCP stdout is protocol-only.** Library code logs to stderr (`console.error`) only; eslint enforces this.
 - **Never hardcode or invent metrics** in README/EVAL.md — they come from `pnpm eval`.
 

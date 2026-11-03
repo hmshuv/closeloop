@@ -1,7 +1,7 @@
 import type { CloseLoopConfig } from "../config.ts";
 import { exposureClassOf } from "./exposure.ts";
 import { stage1Items } from "./stage1-items.ts";
-import { stage2Bank, type DeferredSettlement } from "./stage2-bank.ts";
+import { stage2Bank, type DeferredSettlement, type Stage2Options } from "./stage2-bank.ts";
 import type { BatchStats } from "./stage2-batch.ts";
 import { stage3Ledger } from "./stage3-ledger.ts";
 import { stage4Timing } from "./stage4-timing.ts";
@@ -25,10 +25,10 @@ export interface ReconResult {
  * The deterministic engine. Pure: source records in, matches + exceptions out.
  * It never sees ground truth and never writes financial records.
  */
-export function reconcile(src: SourceData, cfg: CloseLoopConfig, period: { from: string; to: string }, now?: () => number): ReconResult {
+export function reconcile(src: SourceData, cfg: CloseLoopConfig, period: { from: string; to: string }, opts: Stage2Options = {}): ReconResult {
   const started = performance.now();
   const s1 = stage1Items(src, cfg);
-  const s2 = stage2Bank(src, cfg, now);
+  const s2 = stage2Bank(src, cfg, opts);
   const s3 = stage3Ledger(src, cfg);
   const s4 = stage4Timing(src, cfg);
   const tieOut = computeTieOut({ from: period.from, to: period.to, ...s3.tieOut });

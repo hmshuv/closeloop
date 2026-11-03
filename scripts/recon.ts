@@ -1,15 +1,20 @@
 /**
- * pnpm recon [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--db path]
- * Runs the deterministic engine against the recon DB and prints the summary.
+ * pnpm recon [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--db path] [--no-ai]
+ * Runs the deterministic engine against the recon DB and prints the summary. If an LLM is configured in
+ * .env, narration parsing may add grounded candidate tokens for fuzzy matching; it never decides a match.
  */
 import { parseArgs } from "node:util";
-import { defaultDbPath, formatINR, loadConfig, loadEnvFile, openReconDb, runReconciliation } from "@closeloop/core";
+import { defaultDbPath, formatINR, loadConfig, loadEnvFile, openReconDb, providerFromEnv, runReconciliationWithAI } from "@closeloop/core";
 
 loadEnvFile();
-const { values } = parseArgs({ options: { from: { type: "string" }, to: { type: "string" }, db: { type: "string" } } });
+const { values } = parseArgs({
+  options: { from: { type: "string" }, to: { type: "string" }, db: { type: "string" }, "no-ai": { type: "boolean", default: false } },
+});
+const provider = values["no-ai"] ? null : providerFromEnv();
 const db = openReconDb(values.db ?? defaultDbPath());
-const { summary } = runReconciliation(db, loadConfig(), { from: values.from, to: values.to });
+const { summary } = await runReconciliationWithAI(db, loadConfig(), { from: values.from, to: values.to }, provider);
 db.close();
+console.log(provider ? `LLM: ${provider.model} (narration hints only)` : "LLM: none configured — deterministic only");
 
 console.log(`Run ${summary.run_id}  ${summary.from} → ${summary.to}  (${summary.duration_ms} ms)`);
 console.table(summary.matched);

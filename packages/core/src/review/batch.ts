@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Db } from "../db/open.ts";
+import { appendAudit } from "../audit/audit.ts";
 import { exposureClassOf } from "../matcher/exposure.ts";
 
 export type LeftoverOutcome = "missing_raised" | "still_deferred" | "released";
@@ -97,6 +98,13 @@ export function approveBatchCandidate(db: Db, input: { exceptionId: string; setI
       mark.run("missing_raised", id, at, exc.run_id, settlement_id, exc.id);
       result.leftovers.push({ settlement_id, outcome: "missing_raised", exception_id: id });
     }
+    appendAudit(db, {
+      actor: "human",
+      action: "approval",
+      entity_type: "exception",
+      entity_id: exc.id,
+      payload: { reviewer: input.reviewer, set_index: input.setIndex, approved_settlement_ids: chosen, bank_line_id: exc.primary_id, leftovers: result.leftovers },
+    });
   })();
   return result;
 }

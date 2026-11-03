@@ -153,7 +153,45 @@ CREATE INDEX IF NOT EXISTS idx_exceptions_run ON exceptions(run_id, type);
 CREATE INDEX IF NOT EXISTS idx_exceptions_primary ON exceptions(primary_id);
 `;
 
-export const RECON_SCHEMA = FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n") + RECON_OUTPUT_DDL;
+/** AI-layer outputs and the audit trail. The AI layer writes only here, never to financial or match tables. */
+const AI_AND_AUDIT_DDL = `
+CREATE TABLE IF NOT EXISTS ai_outputs (
+  id              TEXT PRIMARY KEY,
+  kind            TEXT NOT NULL CHECK (kind IN ('narration_parse','explanation','journal_draft')),
+  key             TEXT NOT NULL,
+  source          TEXT NOT NULL CHECK (source IN ('llm','deterministic_fallback')),
+  fallback_reason TEXT,
+  model           TEXT,
+  payload_json    TEXT NOT NULL,
+  created_at      TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_ai_outputs_key ON ai_outputs(kind, key);
+
+CREATE TABLE IF NOT EXISTS journal_drafts (
+  id              TEXT PRIMARY KEY,
+  exception_id    TEXT NOT NULL REFERENCES exceptions(id),
+  status          TEXT NOT NULL CHECK (status = 'pending_approval'),
+  lines_json      TEXT NOT NULL,
+  narration       TEXT NOT NULL,
+  source          TEXT NOT NULL CHECK (source IN ('llm','deterministic_fallback')),
+  fallback_reason TEXT,
+  created_at      TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           TEXT PRIMARY KEY,
+  ts           TEXT NOT NULL,
+  actor        TEXT NOT NULL CHECK (actor IN ('system','llm','human')),
+  action       TEXT NOT NULL,
+  entity_type  TEXT NOT NULL,
+  entity_id    TEXT NOT NULL,
+  payload_json TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_id, ts);
+`;
+
+export const RECON_SCHEMA =
+  FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n") + RECON_OUTPUT_DDL + AI_AND_AUDIT_DDL + insertOnlyTriggers("audit_log");
 
 /** Ground truth lives in its own database file. The matcher is never handed this connection. */
 export const TRUTH_SCHEMA = `

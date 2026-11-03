@@ -26,6 +26,16 @@ export function utrCandidateTokens(narration: string, minLength: number, maxLeng
   return [...out];
 }
 
+/**
+ * Extra candidate tokens (e.g. parsed by the AI layer) are accepted only if they are grounded: their
+ * characters appear contiguously in the narration once both are reduced to uppercase alphanumerics.
+ * A hint can therefore surface a UTR that is genuinely in the text, never introduce one.
+ */
+export function groundedTokens(narration: string, hints: readonly string[], minLength: number, maxLength: number): string[] {
+  const text = alnumOnly(narration);
+  return hints.map(alnumOnly).filter((t) => t.length >= minLength && t.length <= maxLength && /\d/.test(t) && text.includes(t));
+}
+
 /** Levenshtein distance, giving up early: returns `max + 1` as soon as the distance must exceed `max`. */
 export function boundedLevenshtein(a: string, b: string, max: number): number {
   if (Math.abs(a.length - b.length) > max) return max + 1;

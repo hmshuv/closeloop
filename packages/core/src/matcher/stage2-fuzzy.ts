@@ -1,7 +1,7 @@
 import { windowStart } from "../calendar.ts";
 import type { CloseLoopConfig } from "../config.ts";
 import type { Settlement } from "../types.ts";
-import { boundedLevenshtein, normalizeUtrText, utrCandidateTokens } from "./similarity.ts";
+import { boundedLevenshtein, groundedTokens, normalizeUtrText, utrCandidateTokens } from "./similarity.ts";
 import { amountSubtype } from "./stage1-items.ts";
 import { settlementsBetween, type BankState } from "./stage2-state.ts";
 import type { StageResult } from "./types.ts";
@@ -39,13 +39,16 @@ function bestEvidence(settlement: Settlement, tokens: string[], cfg: CloseLoopCo
  * - distance ≤ 1 and a margin over the runner-up → MATCHED_FUZZY (or, if only the amount differs, link + AMOUNT_MISMATCH)
  * - distance 2, a truncated UTR, or a failed margin → SUGGESTED_MATCH (needs human approval)
  */
-export function stage2Fuzzy(state: BankState, cfg: CloseLoopConfig): StageResult {
+export function stage2Fuzzy(state: BankState, cfg: CloseLoopConfig, extraTokens?: ReadonlyMap<string, readonly string[]>): StageResult {
   const f = cfg.matching.fuzzy;
   const result: StageResult = { matches: [], exceptions: [] };
 
   for (const line of state.credits) {
     if (state.resolvedCredits.has(line.id)) continue;
-    const tokens = utrCandidateTokens(line.narration, f.min_token_length, f.max_token_length);
+    const own = utrCandidateTokens(line.narration, f.min_token_length, f.max_token_length);
+    // AI hints only add candidate tokens, and only grounded ones; the deterministic scorer below still decides.
+    const hints = groundedTokens(line.narration, extraTokens?.get(line.id) ?? [], f.min_token_length, f.max_token_length);
+    const tokens = [...new Set([...own, ...hints])];
     if (tokens.length === 0) continue;
     const from = windowStart(line.txn_date, f.date_tolerance_business_days, cfg.calendar);
     const evidence = settlementsBetween(state, from, line.txn_date)
@@ -66,6 +69,7 @@ export function stage2Fuzzy(state: BankState, cfg: CloseLoopConfig): StageResult
       settlement_id: e.settlement.id,
       utr: e.settlement.utr,
       token: e.token,
+      token_source: own.includes(e.token) ? "narration" : "ai_hint",
       distance: e.distance,
       truncated: e.distance === null,
       confidence: Number(e.confidence.toFixed(4)),

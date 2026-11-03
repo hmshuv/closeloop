@@ -4,9 +4,10 @@ import type { CloseLoopConfig } from "../config.ts";
 import type { Db } from "../db/open.ts";
 import { EXCEPTION_TYPES, IsoDateSchema, type ExceptionType } from "../types.ts";
 import { summarizeExposure } from "./exposure.ts";
+import { appendAudit } from "../audit/audit.ts";
 import { datasetMeta, loadSource } from "./load.ts";
 import { reconcile, type ReconResult } from "./reconcile.ts";
-import { EXPOSURE_CLASSES, MATCH_KINDS, type MatchKind } from "./types.ts";
+import { EXPOSURE_CLASSES, MATCH_KINDS, type MatchKind, type SourceData } from "./types.ts";
 
 const Counted = z.object({ count: z.number().int().nonnegative(), amount_paise: z.number().int().safe() });
 
@@ -120,6 +121,12 @@ function configHash(cfg: CloseLoopConfig): string {
 export interface RunOptions {
   from?: string;
   to?: string;
+  /** Preloaded source (as of `to`), e.g. when the AI layer already read it to compute hints. */
+  source?: SourceData;
+  /** Grounded candidate tokens per bank line from AI narration parsing. */
+  extraTokens?: ReadonlyMap<string, readonly string[]>;
+  /** Recorded in the run's audit event. */
+  aiUsage?: Record<string, unknown>;
 }
 
 /**
@@ -136,7 +143,7 @@ export function runReconciliation(db: Db, cfg: CloseLoopConfig, opts: RunOptions
   if (from > to) throw new Error(`from (${from}) must not be after to (${to})`);
 
   const startedAt = new Date().toISOString();
-  const result = reconcile(loadSource(db, to), cfg, { from, to });
+  const result = reconcile(opts.source ?? loadSource(db, to), cfg, { from, to }, { extraTokens: opts.extraTokens });
   const runId = randomUUID();
   const summary = ReconSummarySchema.parse(summarize(runId, result, from, to));
 
@@ -157,6 +164,13 @@ export function runReconciliation(db: Db, cfg: CloseLoopConfig, opts: RunOptions
 
   db.transaction(() => {
     insertRun.run(runId, from, to, to, startedAt, new Date().toISOString(), configHash(cfg), JSON.stringify(summary));
+    appendAudit(db, {
+      actor: "system",
+      action: "reconciliation_run",
+      entity_type: "recon_run",
+      entity_id: runId,
+      payload: { from, to, matches: result.matches.length, exceptions: result.exceptions.length, ai: opts.aiUsage ?? { narration_parsing: "not_requested" } },
+    });
     for (const m of result.matches) {
       insertMatch.run(randomUUID(), runId, m.kind, m.left.type, m.left.id, m.right.type, m.right.id, m.confidence, m.reason, m.anchor_date, JSON.stringify(m.trace));
     }
