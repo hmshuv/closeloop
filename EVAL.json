@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-03T10:04:29.188Z",
-  "commit": "4abae61-dirty",
+  "generated_at": "2026-11-04T13:35:34.625Z",
+  "commit": "c19457e",
   "command": "pnpm eval",
   "seeds_used": [
     101,
@@ -14,7 +14,7 @@
   ],
   "payments_per_dataset": 25000,
   "days": 45,
-  "runtime_s": 9.5,
+  "runtime_s": 11.5,
   "coverage_met": true,
   "dev": {
     "credits": [
@@ -50,7 +50,8 @@
     },
     "macroRecall": 0.9334261133603239,
     "macroPrecision": 0.9685897435897436,
-    "recordsPerSecond": 100234.76716603692
+    "typesScored": 13,
+    "recordsPerSecond": 100655.08301932203
   },
   "heldout": {
     "credits": [
@@ -86,7 +87,79 @@
     },
     "macroRecall": 0.91751012145749,
     "macroPrecision": 0.9412587412587412,
-    "recordsPerSecond": 118947.33706984452
+    "typesScored": 13,
+    "recordsPerSecond": 113822.25049927078
+  },
+  "gateway_report_vs_amount_only": {
+    "split": "heldout",
+    "amount_only": {
+      "credits": {
+        "truth_linked": 1467,
+        "correct": 1328,
+        "wrong_links": 1
+      },
+      "batch": {
+        "n": 85,
+        "correct": 34,
+        "wrong": 1,
+        "ambiguous": 32,
+        "conflict": 18,
+        "report_mismatch": 0,
+        "unresolved": 0
+      },
+      "queue": {
+        "ambiguous_batch": 33,
+        "match_conflict": 18,
+        "suggested_match": 107,
+        "gateway_report_mismatch": 0
+      },
+      "unresolved_in_batch": 281,
+      "never_credited": {
+        "n": 43,
+        "detected": 5,
+        "deferred": 37,
+        "missed": 1
+      },
+      "decoys": {
+        "n": 19,
+        "suggested": 19,
+        "unidentified": 0
+      }
+    },
+    "with_report": {
+      "credits": {
+        "truth_linked": 1467,
+        "correct": 1379,
+        "wrong_links": 0
+      },
+      "batch": {
+        "n": 85,
+        "correct": 85,
+        "wrong": 0,
+        "ambiguous": 0,
+        "conflict": 0,
+        "report_mismatch": 0,
+        "unresolved": 0
+      },
+      "queue": {
+        "ambiguous_batch": 0,
+        "match_conflict": 0,
+        "suggested_match": 88,
+        "gateway_report_mismatch": 0
+      },
+      "unresolved_in_batch": 0,
+      "never_credited": {
+        "n": 43,
+        "detected": 43,
+        "deferred": 0,
+        "missed": 0
+      },
+      "decoys": {
+        "n": 19,
+        "suggested": 0,
+        "unidentified": 19
+      }
+    }
   },
   "batch_by_volume": [
     {
