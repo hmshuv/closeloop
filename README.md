@@ -8,7 +8,7 @@
 - **Held-out** (8 seeds × 25,000 payments, unseen noise variants included): 90.5% of bank credits linked to exactly the right settlements (n=1467), 1 wrong link; corrupted UTRs recovered 100.0% (n=352), counting correct suggestions a human still confirms.
 - **Batch credits:** 76.2% decomposed correctly (contiguous 100.0%, non-contiguous 50.0%), 23.8% sent to a human as ambiguous; missing bank credits 3 detected / 16 deferred / 0 missed.
 - **With Razorpay's settlement recon report** (same held-out data): batched credits matched exactly right 100.0% vs 40.0% amount-only (n=85); ambiguous 32 → 0, match conflicts 18 → 0, human review items 158 → 88.
-- **Exceptions:** macro recall 91.8%, precision 94.1% across 13 types; 1,13,822 records/s; full eval 11.5 s. Details in [EVAL.md](EVAL.md).
+- **Exceptions:** macro recall 91.8%, precision 94.1% across 13 types; 1,16,914 records/s; full eval 11.5 s. Details in [EVAL.md](EVAL.md).
 <!-- results:end -->
 
 ## Why this exists

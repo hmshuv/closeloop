@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-04T13:35:34.625Z",
-  "commit": "c19457e",
+  "generated_at": "2026-11-04T13:44:29.050Z",
+  "commit": "8aa9240",
   "command": "pnpm eval",
   "seeds_used": [
     101,
@@ -51,7 +51,7 @@
     "macroRecall": 0.9334261133603239,
     "macroPrecision": 0.9685897435897436,
     "typesScored": 13,
-    "recordsPerSecond": 100655.08301932203
+    "recordsPerSecond": 101581.21262796376
   },
   "heldout": {
     "credits": [
@@ -88,7 +88,7 @@
     "macroRecall": 0.91751012145749,
     "macroPrecision": 0.9412587412587412,
     "typesScored": 13,
-    "recordsPerSecond": 113822.25049927078
+    "recordsPerSecond": 116914.15884685006
   },
   "gateway_report_vs_amount_only": {
     "split": "heldout",
