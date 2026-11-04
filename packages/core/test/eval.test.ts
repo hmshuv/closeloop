@@ -35,6 +35,7 @@ describe("evaluation harness", () => {
     expect(block.split("\n")).toHaveLength(4);
     expect(block).toContain("EVAL.md");
     expect(md).toContain("## Gateway recon report vs amount-only (held-out)");
+    expect(md).toMatch(/## Limitations[\s\S]*always agrees with the bank[\s\S]*GATEWAY_REPORT_MISMATCH[\s\S]*unit tests only/);
     expect(block).toMatch(/With Razorpay's settlement recon report/);
   });
 

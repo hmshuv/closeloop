@@ -146,6 +146,10 @@ export const ImportReconOutput = z.object({
   settled_from: z.string().nullable(),
   settled_to: z.string().nullable(),
   settlements_fetched: z.number().int(),
+  /** The reconciliation re-run right after the import, over the latest run's period. */
+  reconciliation: z.object({ run_id: z.string(), period: Period, batch_credits_from_report: z.number().int(), report_mismatches: z.number().int() }),
+  /** Open batch decisions of the previous run that the report settled. */
+  resolved: z.array(z.object({ bank_line_id: z.string(), was: z.string(), now: z.string() })),
 });
 
 const JournalLineOut = z.object({ account: z.string(), debit: Money, credit: Money, memo: z.string() });

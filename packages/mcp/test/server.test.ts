@@ -245,6 +245,26 @@ describe("Razorpay recon report", () => {
     return { own, run };
   }
 
+  it("demo flow: the seeded DB starts amount-only; importing the fixture re-runs recon and resolves bnk_000236's conflict", async () => {
+    const { own, run } = await connect(null);
+    expect((own.prepare("SELECT COUNT(*) AS n FROM gateway_recon_items").get() as { n: number }).n).toBe(0);
+    // As in Claude Desktop: ask about the credit first (this creates the default amount-only run).
+    const before = await run(DecomposeOutput, "decompose_bank_credit", { bank_line_id: "bnk_000236" });
+    expect(before).toMatchObject({ status: "conflict", match_kind: null });
+    const fixture = fileURLToPath(new URL("../../../fixtures/razorpay/recon-combined.synthetic.json", import.meta.url));
+    const imported = await run(ImportReconOutput, "import_razorpay_recon", { file_path: fixture });
+    expect(imported.resolved).toEqual(expect.arrayContaining([
+      { bank_line_id: "bnk_000236", was: "MATCH_CONFLICT", now: "BATCH_FROM_GATEWAY_REPORT" },
+      { bank_line_id: "bnk_000027", was: "AMBIGUOUS_BATCH", now: "BATCH_FROM_GATEWAY_REPORT" },
+    ]));
+    expect(imported.reconciliation.report_mismatches).toBe(0);
+    expect(imported.summary).toMatch(/Re-ran reconciliation .*resolved .*MATCH_CONFLICT on bnk_000236/);
+    // Ask again, without calling run_reconciliation: the import already re-ran it.
+    const after = await run(DecomposeOutput, "decompose_bank_credit", { bank_line_id: "bnk_000236" });
+    expect(after).toMatchObject({ status: "decomposed", match_kind: "BATCH_FROM_GATEWAY_REPORT", difference_vs_credit: { amount_paise: 0 } });
+    expect(after.settlements.map((x) => x.settlement_id).sort()).toEqual(before.candidate_sets[0]?.settlement_ids.slice().sort());
+  });
+
   it("imports an export file, then matches batched credits from it without touching financial records", async () => {
     const { own, run } = await connect(null);
     const dir = mkdtempSync(join(tmpdir(), "closeloop-rzp-"));

@@ -1,0 +1,7 @@
+{
+  "note": "Razorpay settlement recon import. recon_page_size: rows per GET /v1/settlements/recon/combined page; 100 matches Razorpay's own MCP tool, and the API accepts up to 1000. csv_header_aliases: map a CSV export's column headers to the API field names, case-insensitively, e.g. {\"Settlement UTR\": \"settlement_utr\", \"Entity ID\": \"entity_id\"}. Amounts must still be integer paise.",
+  "razorpay": {
+    "recon_page_size": 100,
+    "csv_header_aliases": {}
+  }
+}

@@ -256,7 +256,7 @@ export function renderEvalMarkdown(r: EvalResult, meta: ReportMeta): string {
       ],
     ),
     "",
-    "The synthetic report is generated from the same data as the bank statement, so it never disagrees with the bank: this measures what item-level links buy, not how the engine handles a faulty report. Disagreements (bank credit off by a paisa, report rows not adding up to a settlement, a settlement the bank paid separately) are covered by unit tests and raise GATEWAY_REPORT_MISMATCH without matching.",
+    "This measures what item-level links buy, not how the engine handles a faulty report: see Limitations.",
     "",
   );
 
@@ -314,6 +314,14 @@ export function renderEvalMarkdown(r: EvalResult, meta: ReportMeta): string {
       : `${misses.length} held-out misses (${misses.filter((m) => m.kind === "FN").length} FN, ${misses.filter((m) => m.kind === "FP").length} FP), grouped by cause.`,
     "",
     ...(misses.length ? [table(["Kind", "Type", "Cause", "n", "Examples"], misscats.map(([key, c]) => [c.kind, c.type, key.split("|")[2] ?? "", c.n, c.examples.map((e) => `\`${e}\``).join(", ")]))] : []),
+    "",
+  );
+  out.push(
+    "## Limitations",
+    "",
+    "- **Synthetic data only.** Every dataset comes from CloseLoop's own generator. The held-out noise variants reduce, but don't remove, the bias of the same author writing the generator and the matcher.",
+    `- **The gateway recon report always agrees with the bank.** The report in the comparison above is generated from the same synthetic data as the bank statement, so it never disagrees with it, and GATEWAY_REPORT_MISMATCH is never raised in this eval (${W.queue.gateway_report_mismatch} raised). That exception is covered by unit tests only (\`packages/core/test/gateway.test.ts\`: a bank credit off by one paisa, report rows that don't add up to the settlement), not by this eval. The eval also never sees a partial or late report, a report with extra or missing rows, or real dashboard export formats.`,
+    "- **Exception labels assume amount-only matching.** For example, an ambiguity trap is labelled AMBIGUOUS_BATCH. The per-type precision and recall above are therefore reported for amount-only mode only; the gateway comparison is scored from truth links.",
     "",
   );
   return out.join("\n");

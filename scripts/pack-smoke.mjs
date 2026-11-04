@@ -81,20 +81,28 @@ async function installAndRun(tarball) {
   send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "decompose_bank_credit", arguments: { bank_line_id: "bnk_000080" } } });
   const tools = await waitFor(2);
   const call = await waitFor(3);
-  send({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "import_razorpay_recon", arguments: { file_path: report } } });
-  const imported = await waitFor(4);
-  send({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "run_reconciliation", arguments: { from: "2026-10-01", to: "2026-10-31" } } });
-  const run = await waitFor(5);
+  // The demo flow: the seeded DB starts amount-only (bnk_000236 is a match conflict); importing the report resolves it.
+  const decompose = async (id) => {
+    send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "decompose_bank_credit", arguments: { bank_line_id: "bnk_000236" } } });
+    return (await waitFor(id)).result?.structuredContent;
+  };
+  const before = await decompose(4);
+  send({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "import_razorpay_recon", arguments: { file_path: report } } });
+  const imported = await waitFor(5);
+  const after = await decompose(6);
   child.kill();
 
   for (const l of lines()) if (JSON.parse(l).jsonrpc !== "2.0") fail(`non-JSON-RPC line on stdout: ${l}`);
   if (tools.result?.tools?.length !== 10) fail(`expected 10 tools, got ${tools.result?.tools?.length}`);
   if (call.result?.isError) fail(`tool call failed: ${call.result.content?.[0]?.text}`);
+  if (before?.status !== "conflict") fail(`bnk_000236 should start as a match conflict (amount-only), got ${before?.status}`);
   if (imported.result?.isError || !(imported.result?.structuredContent?.inserted > 0)) fail(`import_razorpay_recon failed: ${imported.result?.content?.[0]?.text}`);
-  if (!(run.result?.structuredContent?.matched?.bank_credits_batch_gateway_report > 0)) fail(`no BATCH_FROM_GATEWAY_REPORT matches after import: ${run.result?.content?.[0]?.text}`);
+  if (!imported.result.structuredContent.resolved.some((r) => r.bank_line_id === "bnk_000236")) fail("import did not report bnk_000236 as resolved");
+  if (after?.match_kind !== "BATCH_FROM_GATEWAY_REPORT") fail(`bnk_000236 after import: ${after?.status} / ${after?.match_kind}`);
   console.log(`pack-smoke: ${tools.result.tools.length} tools; decompose_bank_credit → ${call.result.content[0].text.split("\n")[0]}`);
+  console.log(`pack-smoke: bnk_000236 before import → ${before.status}`);
   console.log(`pack-smoke: import_razorpay_recon → ${imported.result.content[0].text.split("\n")[0]}`);
-  console.log(`pack-smoke: run_reconciliation with the report → ${run.result.structuredContent.matched.bank_credits_batch_gateway_report} credits matched from the gateway report`);
+  console.log(`pack-smoke: bnk_000236 after import → ${after.status} (${after.match_kind})`);
   console.log("pack-smoke: stderr:\n" + stderr.trim());
   console.log(`pack-smoke: OK on Node ${process.version} (${process.platform}/${process.arch})`);
 }

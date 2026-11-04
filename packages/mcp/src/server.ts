@@ -59,7 +59,7 @@ const INSTRUCTIONS = [
   "CloseLoop reconciles Razorpay-style gateway settlements against the bank statement and the accounting ledger.",
   "All money is integer paise; every amount also comes pre-formatted as amount_inr (Indian grouping). Quote amount_inr and the totals the tools return; never do arithmetic on amounts yourself.",
   "Exposure is reported per class (AMOUNT_AT_RISK, AWAITING_SETTLEMENT, STRUCTURAL) and must never be added together.",
-  "If the user has Razorpay's settlement recon report (an export, or API keys configured for CloseLoop), import_razorpay_recon loads it so batched bank credits are matched from the gateway's own rows instead of amounts alone; then run run_reconciliation again.",
+  "If the user has Razorpay's settlement recon report (an export, or API keys configured for CloseLoop), import_razorpay_recon loads it and re-runs the reconciliation, so batched bank credits are matched from the gateway's own rows instead of amounts alone.",
   "The deterministic engine decides every match. approve_suggestion and escalate are human actions: call once to get a preview and confirm_token, show the preview to the user, and only call again with confirm_token and the user's name as reviewer after they explicitly agree.",
 ].join(" ");
 
@@ -464,7 +464,7 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
       description:
         "Load Razorpay's settlement recon report (the documented /v1/settlements/recon/combined format; the same data Razorpay's own MCP server returns from fetch_settlement_recon_details) so batched bank credits are matched from the gateway's item-level rows (match kind BATCH_FROM_GATEWAY_REPORT) instead of amount-only subset search, and each settlement's payments and refunds are linked from the report. " +
         "Pass file_path for a JSON or CSV export (CSV headers are the API field names; amounts in paise), or from/to (YYYY-MM-DD) to fetch it from the Razorpay API, which needs CLOSELOOP_RAZORPAY_KEY_ID and CLOSELOOP_RAZORPAY_KEY_SECRET in CloseLoop's own environment and only ever makes GET requests. " +
-        "Rows are stored insert-only and re-importing is a no-op. Run run_reconciliation afterwards to use the report.",
+        "Rows are stored insert-only and re-importing is a no-op. The reconciliation is then re-run over the latest run's period, and the response lists the open ambiguous batches and match conflicts the report resolved.",
       inputSchema: {
         file_path: z.string().min(1).optional().describe("Path to a .json or .csv recon export; ~ is expanded"),
         from: IsoDateSchema.optional().describe("Fetch from the Razorpay API: first settlement day, YYYY-MM-DD"),
@@ -482,7 +482,7 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
       if (file_path) {
         const path = resolve(file_path.replace(/^~(?=$|\/)/, homedir()));
         if (statSync(path).size > 200 * 1024 * 1024) throw new Error(`${path} is larger than 200 MB; import it in monthly files.`);
-        items = parseReconFile(path, readFileSync(path, "utf8"));
+        items = parseReconFile(path, readFileSync(path, "utf8"), ctx.cfg.gateway.razorpay.csv_header_aliases);
         source = "file";
         origin = path;
       } else {
@@ -494,16 +494,30 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
         source = "api";
         origin = `api.razorpay.com GET /v1/settlements/recon/combined + /v1/settlements, ${from}..${to}`;
       }
+      const before = latestRun(db);
       const r = importRazorpayRecon(db, items, { source, origin, settlements });
       const synthetic = items.some((i) => JSON.stringify(i.notes ?? "").includes(SYNTHETIC_NOTE));
+      // Re-run so every later tool call sees the report, then say what it settled.
+      const { summary: after } = await runReconciliationWithAI(db, ctx.cfg, before ? { from: before.from, to: before.to } : {}, ctx.provider);
+      const openBefore = before
+        ? (db.prepare("SELECT primary_id, type FROM exceptions WHERE run_id = ? AND type IN ('AMBIGUOUS_BATCH','MATCH_CONFLICT') AND status = 'open' ORDER BY primary_id").all(before.id) as { primary_id: string; type: string }[])
+        : [];
+      const fromReport = new Set((db.prepare("SELECT DISTINCT right_id FROM matches WHERE run_id = ? AND kind = 'BATCH_FROM_GATEWAY_REPORT'").all(after.run_id) as { right_id: string }[]).map((x) => x.right_id));
+      const resolved = openBefore.filter((e) => fromReport.has(e.primary_id)).map((e) => ({ bank_line_id: e.primary_id, was: e.type, now: "BATCH_FROM_GATEWAY_REPORT" }));
+      const mismatches = (db.prepare("SELECT COUNT(*) AS n FROM exceptions WHERE run_id = ? AND type = 'GATEWAY_REPORT_MISMATCH'").get(after.run_id) as { n: number }).n;
       return respond(
         ImportReconOutput.parse({
           ...r,
           summary:
             `${synthetic ? "SYNTHETIC demo report. " : ""}Read ${r.rows_read} recon row(s) from ${source === "api" ? "the Razorpay API (read-only)" : origin}: ${r.inserted} new, ${r.duplicates} already imported` +
             `${r.conflicts.length ? `, ${r.conflicts.length} conflicting with an earlier import (kept the earlier copy)` : ""}${r.unsettled ? `, ${r.unsettled} not yet settled (skipped)` : ""}. ` +
-            `Covers ${r.settlements_covered} settlement(s) paid under ${r.payout_utrs} bank transfer UTR(s)${r.settled_from ? `, settled ${r.settled_from} → ${r.settled_to}` : ""}. Run run_reconciliation to use it.`,
+            `Covers ${r.settlements_covered} settlement(s) paid under ${r.payout_utrs} bank transfer UTR(s)${r.settled_from ? `, settled ${r.settled_from} → ${r.settled_to}` : ""}. ` +
+            `Re-ran reconciliation for ${after.from} → ${after.to}: ${fromReport.size} batched credit(s) matched from the report` +
+            `${resolved.length ? `; resolved ${resolved.map((x) => `${x.was} on ${x.bank_line_id}`).join(", ")}` : ""}` +
+            `${mismatches ? `; ${mismatches} GATEWAY_REPORT_MISMATCH exception(s) where the report and the bank disagree` : ""}.`,
           synthetic,
+          reconciliation: { run_id: after.run_id, period: { from: after.from, to: after.to }, batch_credits_from_report: fromReport.size, report_mismatches: mismatches },
+          resolved,
           conflict_count: r.conflicts.length,
           conflicts: r.conflicts.slice(0, 20),
         }),

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { BankCalendar } from "./calendar.ts";
 import { PaiseSchema } from "./money.ts";
+import { RECON_FIELDS } from "./gateway/razorpay.ts";
 import { IsoDateSchema, NoiseKindSchema, type PaymentMethod } from "./types.ts";
 
 const perMethod = <T extends z.ZodTypeAny>(schema: T) =>
@@ -90,7 +91,19 @@ export const AiConfigSchema = z.object({
   journal: z.object({ max_tokens: z.number().int().positive() }),
 });
 
+export const GatewayConfigSchema = z.object({
+  note: z.string().optional(),
+  razorpay: z.object({
+    /** Rows per recon page. Razorpay's MCP tool uses 100; the recon/combined API accepts 1 to 1000. */
+    recon_page_size: z.number().int().min(1).max(1000),
+    /** CSV export header → API field name, matched case-insensitively. */
+    csv_header_aliases: z.record(z.string().min(1), z.enum(RECON_FIELDS)),
+  }),
+});
+export const DEFAULT_GATEWAY_CONFIG: z.infer<typeof GatewayConfigSchema> = { razorpay: { recon_page_size: 100, csv_header_aliases: {} } };
+
 export type AiConfig = z.infer<typeof AiConfigSchema>;
+export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 export type WindowsConfig = z.infer<typeof WindowsConfigSchema>;
 export type FeesConfig = z.infer<typeof FeesConfigSchema>;
 export type MatchingConfig = z.infer<typeof MatchingConfigSchema>;
@@ -102,6 +115,7 @@ export interface CloseLoopConfig {
   matching: MatchingConfig;
   generator: GeneratorConfig;
   ai: AiConfig;
+  gateway: GatewayConfig;
   calendar: BankCalendar;
 }
 
@@ -125,6 +139,8 @@ export function loadConfig(dir: string = defaultConfigDir()): CloseLoopConfig {
     matching: readJson(dir, "matching.json", MatchingConfigSchema),
     generator: readJson(dir, "generator.json", GeneratorConfigSchema),
     ai: readJson(dir, "ai.json", AiConfigSchema),
+    // Optional, so a config directory written before gateway support still loads.
+    gateway: existsSync(join(dir, "gateway.json")) ? readJson(dir, "gateway.json", GatewayConfigSchema) : DEFAULT_GATEWAY_CONFIG,
     calendar: {
       secondAndFourthSaturdayOff: windows.calendar.second_and_fourth_saturday_off,
       holidays: new Set(windows.calendar.holidays.map((h) => h.date)),

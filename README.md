@@ -159,38 +159,60 @@ npx @modelcontextprotocol/inspector --cli node packages/mcp/dist/closeloop-mcp.j
 
 ## Using with Razorpay's official MCP server
 
-[Razorpay's MCP server](https://github.com/razorpay/razorpay-mcp-server) gives Claude access to a merchant's Razorpay account: payments, orders, refunds and settlements, including the settlement recon report (`fetch_settlement_recon_details`). CloseLoop does something different with that data: it reconciles settlements against the bank statement and the books. The two run side by side in Claude Desktop:
+[Razorpay's MCP server](https://github.com/razorpay/razorpay-mcp-server) gives Claude access to a merchant's Razorpay account: payments, orders, refunds and settlements, including the settlement recon report (`fetch_settlement_recon_details`). CloseLoop does something different with that data: it reconciles settlements against the bank statement and the books. The two run side by side in Claude Desktop.
+
+> Verified against Razorpay's docs (the razorpay-mcp-server README, last updated 26 March 2026) as of 4 November 2026. Check [their README](https://github.com/razorpay/razorpay-mcp-server#readme) for the latest setup.
+
+**Razorpay's Remote server (their recommended option).** It is hosted by Razorpay, so there is nothing to install beyond Node.js, which provides `npx`:
 
 ```json
 {
   "mcpServers": {
-    "razorpay": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "-e", "RAZORPAY_KEY_ID", "-e", "RAZORPAY_KEY_SECRET", "-e", "READ_ONLY", "razorpay/mcp"],
-      "env": { "RAZORPAY_KEY_ID": "rzp_live_…", "RAZORPAY_KEY_SECRET": "…", "READ_ONLY": "true" }
+    "rzp-mcp-server": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://mcp.razorpay.com/mcp", "--header", "Authorization: Basic <Merchant Token>"]
     },
     "closeloop": {
       "command": "npx",
-      "args": ["-y", "closeloop-mcp"],
-      "env": { "CLOSELOOP_RAZORPAY_KEY_ID": "rzp_live_…", "CLOSELOOP_RAZORPAY_KEY_SECRET": "…" }
+      "args": ["-y", "closeloop-mcp"]
     }
   }
 }
 ```
 
-The Razorpay block follows its README (Docker image; `READ_ONLY` is its read-only mode). Razorpay also hosts a remote server at `https://mcp.razorpay.com/mcp`; see its README for that setup.
+Razorpay's README says to generate the merchant token with `echo <RAZORPAY_API_KEY>:<RAZORPAY_API_SECRET> | base64`, using the key and secret from Dashboard → Settings → API Keys.
 
-**Who does what.** Use Razorpay's server to look things up: a payment's status, a refund, one settlement's details. Use CloseLoop to close the month: `import_razorpay_recon` loads the recon report, and `run_reconciliation` then matches each batched bank credit from the report's item-level rows (`BATCH_FROM_GATEWAY_REPORT`) instead of guessing from amounts. A typical session: *"Import Razorpay's settlement recon for October, reconcile October, and tell me what's still open"*, then *"Look up settlement setl_… in Razorpay"* for anything that needs the gateway's side.
+**Alternative: Razorpay's Local server (their public Docker image).** Add this block in place of `rzp-mcp-server`, exactly as their README gives it:
+
+```json
+"razorpay-mcp-server": {
+  "command": "docker",
+  "args": ["run", "--rm", "-i", "-e", "RAZORPAY_KEY_ID", "-e", "RAZORPAY_KEY_SECRET", "razorpay/mcp"],
+  "env": { "RAZORPAY_KEY_ID": "your_razorpay_key_id", "RAZORPAY_KEY_SECRET": "your_razorpay_key_secret" }
+}
+```
+
+For the local server's other options, see the Configuration section of their README.
+
+**Who does what.** Use Razorpay's server to look things up: a payment's status, a refund, one settlement's details. Use CloseLoop to close the month. `import_razorpay_recon` loads the recon report and re-runs the reconciliation, so each batched bank credit is matched from the report's item-level rows (`BATCH_FROM_GATEWAY_REPORT`) instead of guessed from amounts, and the response lists the open ambiguous batches and match conflicts it resolved. A typical session: *"Import Razorpay's settlement recon for October and tell me what's still open"*, then *"Look up settlement setl_… in Razorpay"* for anything that needs the gateway's side.
 
 **Getting the report into CloseLoop.** Don't route thousands of recon rows through the chat. CloseLoop takes the report directly, in one of two ways:
-- **Read-only API fetch:** give CloseLoop its own keys (`CLOSELOOP_RAZORPAY_KEY_ID`, `CLOSELOOP_RAZORPAY_KEY_SECRET`), then call `import_razorpay_recon({from, to})`. The variable names differ from Razorpay's own server so that CloseLoop never picks up keys meant for another process.
-- **Export file:** `import_razorpay_recon({file_path})` with JSON in the API's `recon/combined` format, or CSV with the API's field names as headers. Amounts must be integers in paise, as the API returns them: a rupee-denominated column is rejected rather than misread 100×.
+- **Read-only API fetch:** give CloseLoop its own keys in its `env` block (`CLOSELOOP_RAZORPAY_KEY_ID`, `CLOSELOOP_RAZORPAY_KEY_SECRET`), then call `import_razorpay_recon({from, to})`. The names differ from Razorpay's so that CloseLoop never picks up keys meant for another server. Pages hold 100 rows by default, as in Razorpay's own tool; raise `razorpay.recon_page_size` in `config/gateway.json` up to the API's maximum of 1,000.
+- **Export file:** `import_razorpay_recon({file_path})` with JSON in the API's `recon/combined` response format, or CSV.
+  - **CSV headers** must be the API's field names (`entity_id`, `type`, `debit`, `credit`, `amount`, `currency`, `fee`, `tax`, `settlement_id`, `settlement_utr`, `settled_at`, …). If an export uses other column names, map them in `config/gateway.json`, for example `"csv_header_aliases": {"Settlement UTR": "settlement_utr"}`. Matching is case-insensitive, and aliases may only target documented field names.
+  - **Amounts** must be integers in paise, as the API returns them. A rupee-denominated column is rejected rather than misread 100×.
+- **Changing the defaults under `npx`:** the defaults ship inside the package. To change them, copy the repo's `config/` folder and set `CLOSELOOP_CONFIG_DIR` to it in CloseLoop's `env` block.
 
 **Recon fetching is read-only.** CloseLoop's Razorpay client can only send `GET` to two documented endpoints, `/v1/settlements/recon/combined` and `/v1/settlements`. It has no method that sends a request body or uses another HTTP verb, and a test asserts that every request it makes is a GET. Keys come from the environment only and never appear in tool output or the audit trail. Imported rows go into insert-only tables in CloseLoop's state DB, never into the financial source data, and re-importing the same rows is a no-op.
 
 **Amounts still have to agree.** The report decides *which* settlements a bank credit contains. CloseLoop still checks Σ settlements = Σ report rows (credit − debit) = the bank credit, to the paisa. If the report and the bank disagree, nothing is matched, and a `GATEWAY_REPORT_MISMATCH` exception goes to a human.
 
-**Try it without a Razorpay account.** `npx -y closeloop-mcp demo-report ~/closeloop-recon.synthetic.json` writes a **synthetic** recon report for the demo data in the documented format; every row says so in `notes`. The same report is committed in [fixtures/razorpay/](fixtures/razorpay/) as JSON and CSV. Ask Claude to import it, then reconcile again. On held-out data the eval measures what the report changes (see the Results line above and [EVAL.md](EVAL.md)).
+**Try it without a Razorpay account.** The auto-seeded demo starts in amount-only mode: ask *"Break down bank credit bnk_000236"* and you get a match conflict. Then import the **synthetic** report and ask again:
+1. Write the report with `npx -y closeloop-mcp demo-report ~/closeloop-recon.synthetic.json`, or use the committed copy in [fixtures/razorpay/](fixtures/razorpay/).
+2. Ask Claude to import that file.
+3. Ask about bnk_000236 again: it is now matched from the report.
+
+Every row of the synthetic report says it is synthetic in `notes`. On held-out data the eval measures what the report changes (see the Results line above and [EVAL.md](EVAL.md)).
 
 ## LLM setup (optional)
 

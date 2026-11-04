@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   }
 
   const creds = razorpayCredentialsFromEnv(process.env);
-  const razorpay = creds ? new RazorpayReadOnlyClient(creds) : null;
+  const razorpay = creds ? new RazorpayReadOnlyClient(creds, { reconPageSize: cfg.gateway.razorpay.recon_page_size }) : null;
   const server = createCloseLoopServer({ db, cfg, provider, confirmations: new ConfirmationStore(), razorpay });
   await server.connect(new StdioServerTransport());
   const network = [provider ? `LLM ${provider.model}` : null, razorpay ? "Razorpay API read-only (GET recon/settlements)" : null].filter(Boolean);

@@ -22,8 +22,8 @@ export const ReconSummarySchema = z.object({
     bank_fuzzy: z.number().int(),
     bank_batch_contiguous_credits: z.number().int(),
     bank_batch_credits: z.number().int(),
-    /** Batched credits linked from the gateway recon report's item-level rows (0 without a report). */
-    bank_gateway_report_credits: z.number().int(),
+    /** Batched credits linked from the gateway recon report's item-level rows (0 without a report; absent in 0.1.x runs). */
+    bank_gateway_report_credits: z.number().int().default(0),
     bank_batch_settlements: z.number().int(),
     ledger_by_reference: z.number().int(),
     ledger_by_attributes: z.number().int(),
@@ -71,7 +71,8 @@ export const ReconSummarySchema = z.object({
       not_found: z.number().int(),
       unknown_settlements: z.number().int(),
     })
-    .nullable(),
+    .nullable()
+    .default(null), // runs stored by 0.1.x have no gateway_report field
   duration_ms: z.number().nonnegative(),
 });
 export type ReconSummary = z.infer<typeof ReconSummarySchema>;

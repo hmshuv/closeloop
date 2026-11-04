@@ -133,16 +133,22 @@ function csvRows(text: string): string[][] {
   return rows;
 }
 
+/** Header text → API field name, case-insensitive. Unknown headers pass through unchanged. */
+export type CsvHeaderAliases = Readonly<Record<string, string>>;
+
 /**
- * A CSV export with the API's field names as the header row. Amounts must be integers in paise, exactly as the API
- * returns them: a rupee-denominated column ("12.50") is rejected rather than silently read 100× too small.
+ * A CSV export whose header row uses the API's field names (`entity_id`, `settlement_utr`, …). An export with other
+ * column names can be mapped with `aliases` (config/gateway.json → razorpay.csv_header_aliases). Amounts must be
+ * integers in paise, exactly as the API returns them: a rupee-denominated column ("12.50") is rejected rather than
+ * silently read 100× too small.
  */
-export function parseReconCsv(text: string): RazorpayReconItem[] {
+export function parseReconCsv(text: string, aliases: CsvHeaderAliases = {}): RazorpayReconItem[] {
   const [header, ...body] = csvRows(text.replace(/^\uFEFF/, ""));
   if (!header) throw new Error("empty CSV");
-  const columns = header.map((h) => h.trim());
+  const alias = new Map(Object.entries(aliases).map(([from, to]) => [from.trim().toLowerCase(), to]));
+  const columns = header.map((h) => alias.get(h.trim().toLowerCase()) ?? h.trim());
   for (const required of ["entity_id", "type", "debit", "credit", "amount", "currency", "fee", "tax", "settlement_id", "settled_at"]) {
-    if (!columns.includes(required)) throw new Error(`CSV is missing the "${required}" column`);
+    if (!columns.includes(required)) throw new Error(`CSV is missing the "${required}" column. Headers must be the API's field names, or be mapped to them in config/gateway.json (razorpay.csv_header_aliases). Found: ${header.join(", ")}`);
   }
   const raw = body.map((cells, r) =>
     Object.fromEntries(
@@ -162,8 +168,8 @@ export function parseReconCsv(text: string): RazorpayReconItem[] {
   return validate(raw);
 }
 
-export function parseReconFile(path: string, text: string): RazorpayReconItem[] {
-  return /\.csv$/i.test(path) ? parseReconCsv(text) : parseReconJson(text);
+export function parseReconFile(path: string, text: string, csvHeaderAliases: CsvHeaderAliases = {}): RazorpayReconItem[] {
+  return /\.csv$/i.test(path) ? parseReconCsv(text, csvHeaderAliases) : parseReconJson(text);
 }
 
 export function reconItemsToCsv(items: readonly RazorpayReconItem[]): string {
@@ -211,9 +217,12 @@ export interface RazorpayClientOptions {
   fetch?: typeof fetch;
   baseUrl?: string;
   timeoutMs?: number;
+  /** Rows per recon page: 100 by default (as Razorpay's MCP tool), at most 1000 (the API's documented maximum). */
+  reconPageSize?: number;
 }
 
-const RECON_PAGE = 1000; // documented maximum `count` for recon/combined
+const RECON_PAGE_DEFAULT = 100;
+const RECON_PAGE_MAX = 1000;
 const SETTLEMENT_PAGE = 100; // documented maximum `count` for settlements
 
 /**
@@ -225,12 +234,15 @@ export class RazorpayReadOnlyClient {
   readonly #fetch: typeof fetch;
   readonly #base: string;
   readonly #timeoutMs: number;
+  readonly #reconPage: number;
 
   constructor(creds: RazorpayCredentials, opts: RazorpayClientOptions = {}) {
     this.#auth = `Basic ${Buffer.from(`${creds.keyId}:${creds.keySecret}`).toString("base64")}`;
     this.#fetch = opts.fetch ?? fetch;
     this.#base = (opts.baseUrl ?? "https://api.razorpay.com/v1").replace(/\/$/, "");
     this.#timeoutMs = opts.timeoutMs ?? 20_000;
+    this.#reconPage = opts.reconPageSize ?? RECON_PAGE_DEFAULT;
+    if (!Number.isInteger(this.#reconPage) || this.#reconPage < 1 || this.#reconPage > RECON_PAGE_MAX) throw new Error(`reconPageSize must be an integer from 1 to ${RECON_PAGE_MAX}`);
   }
 
   async #get(path: "/settlements/recon/combined" | "/settlements", query: Record<string, number>): Promise<unknown> {
@@ -258,7 +270,7 @@ export class RazorpayReadOnlyClient {
     const raw: unknown[] = [];
     for (let day = from; day <= to; day = nextDay(day)) {
       const [year, month, date] = day.split("-").map(Number) as [number, number, number];
-      raw.push(...(await this.#pages("/settlements/recon/combined", { year, month, day: date }, RECON_PAGE)));
+      raw.push(...(await this.#pages("/settlements/recon/combined", { year, month, day: date }, this.#reconPage)));
     }
     return validate(raw);
   }

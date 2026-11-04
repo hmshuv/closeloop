@@ -1,7 +1,8 @@
-import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { GatewayConfigSchema, loadConfig } from "../src/config.ts";
 import { openReconDb } from "../src/db/open.ts";
 import { GATEWAY_TABLES } from "../src/db/schema.ts";
 import { buildSyntheticReconReport, reconReportJson, SYNTHETIC_NOTE } from "../src/gateway/fixture.ts";
@@ -65,6 +66,15 @@ describe("Razorpay recon report: parsing the documented format", () => {
     expect(parseReconCsv(csv).map(toReportRow)).toEqual(items.map(toReportRow));
   });
 
+  it("maps differently named export headers through configured aliases, case-insensitively", () => {
+    const csv = reconItemsToCsv(parseReconJson(DOCS_EXAMPLE)).replace("entity_id,", "Entity ID,").replace(",settlement_utr,", ",Settlement UTR,");
+    expect(() => parseReconCsv(csv)).toThrow(/missing the "entity_id" column.*csv_header_aliases/);
+    const rows = parseReconCsv(csv, { "entity id": "entity_id", "SETTLEMENT UTR": "settlement_utr" });
+    expect(rows.map(toReportRow)).toEqual(parseReconJson(DOCS_EXAMPLE).map(toReportRow));
+    // Aliases may only target documented field names.
+    expect(GatewayConfigSchema.safeParse({ razorpay: { recon_page_size: 100, csv_header_aliases: { "UTR No": "utr_number" } } }).success).toBe(false);
+  });
+
   it("rejects rupee-denominated amounts and non-INR currencies instead of misreading them", () => {
     const csv = reconItemsToCsv(parseReconJson(DOCS_EXAMPLE)).replace(",97100,100000,", ",971.00,1000.00,");
     expect(() => parseReconCsv(csv)).toThrow(/not an integer amount in paise/);
@@ -84,11 +94,11 @@ describe("Razorpay read-only client", () => {
       return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
     }) as unknown as typeof fetch;
 
-  it("only ever sends authenticated GETs to the documented settlement endpoints, and pages through results", async () => {
+  it("only ever sends authenticated GETs to the documented settlement endpoints, and pages 100 rows at a time", async () => {
     calls.length = 0;
-    const client = new RazorpayReadOnlyClient({ keyId: "rzp_test_id", keySecret: "s3cret" }, { fetch: fakeFetch({ "/v1/settlements/recon/combined?day=1&skip=0": page(1000), "/v1/settlements/recon/combined?day=1&skip=1000": page(3) }) });
+    const client = new RazorpayReadOnlyClient({ keyId: "rzp_test_id", keySecret: "s3cret" }, { fetch: fakeFetch({ "/v1/settlements/recon/combined?day=1&skip=0": page(100), "/v1/settlements/recon/combined?day=1&skip=100": page(3) }) });
     const items = await client.fetchRecon("2026-10-01", "2026-10-02");
-    expect(items).toHaveLength(1003);
+    expect(items).toHaveLength(103);
     await client.fetchSettlements("2026-10-01", "2026-10-02");
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
@@ -100,12 +110,21 @@ describe("Razorpay read-only client", () => {
     }
     const recon = calls.filter((c) => c.url.includes("recon")).map((c) => Object.fromEntries(new URL(c.url).searchParams));
     expect(recon).toEqual([
-      { year: "2026", month: "10", day: "1", count: "1000", skip: "0" },
-      { year: "2026", month: "10", day: "1", count: "1000", skip: "1000" },
-      { year: "2026", month: "10", day: "2", count: "1000", skip: "0" },
+      { year: "2026", month: "10", day: "1", count: "100", skip: "0" },
+      { year: "2026", month: "10", day: "1", count: "100", skip: "100" },
+      { year: "2026", month: "10", day: "2", count: "100", skip: "0" },
     ]);
     const settlementsQuery = Object.fromEntries(new URL(calls.at(-1)?.url ?? "").searchParams);
     expect(settlementsQuery).toMatchObject({ from: String(Date.parse("2026-10-01T00:00:00+05:30") / 1000), to: String(Date.parse("2026-10-03T00:00:00+05:30") / 1000 - 1), count: "100" });
+  });
+
+  it("takes a larger page size from config, up to the API's 1000", async () => {
+    calls.length = 0;
+    const client = new RazorpayReadOnlyClient({ keyId: "a", keySecret: "b" }, { reconPageSize: 1000, fetch: fakeFetch({ "/v1/settlements/recon/combined?day=1&skip=0": page(1000), "/v1/settlements/recon/combined?day=1&skip=1000": page(2) }) });
+    expect(await client.fetchRecon("2026-10-01", "2026-10-01")).toHaveLength(1002);
+    expect(calls.map((c) => new URL(c.url).searchParams.get("count"))).toEqual(["1000", "1000"]);
+    expect(() => new RazorpayReadOnlyClient({ keyId: "a", keySecret: "b" }, { reconPageSize: 1001 })).toThrow(/1 to 1000/);
+    expect(loadConfig().gateway.razorpay.recon_page_size).toBe(100);
   });
 
   it("reports API errors without echoing credentials", async () => {
@@ -295,5 +314,26 @@ describe("the synthetic demo report", () => {
     const amountOnly = reconcile({ ...loadSource(db, ds.meta.as_of), gatewayReport: [] }, cfg, { from: ds.meta.period_start, to: ds.meta.as_of });
     expect(amountOnly.gateway).toBeNull();
     expect(amountOnly.matches.some((m) => m.kind === "BATCH_FROM_GATEWAY_REPORT")).toBe(false);
+  });
+});
+
+describe("upgrading from 0.1.x", () => {
+  it("reads runs stored before gateway reports existed, and config directories without gateway.json", async () => {
+    const { latestRun } = await import("../src/review/runs.ts");
+    const db = openReconDb(":memory:");
+    loadDataset(db, null, generateDataset({ seed: 7, payments: 400 }));
+    const { summary } = runReconciliation(db, cfg);
+    const old: Record<string, unknown> = { ...summary };
+    delete old.gateway_report;
+    const legacy = { ...old, matched: Object.fromEntries(Object.entries(summary.matched).filter(([k]) => k !== "bank_gateway_report_credits")) };
+    db.prepare("INSERT INTO recon_runs (id, from_date, to_date, as_of, started_at, finished_at, config_hash, summary_json) VALUES ('legacy', ?, ?, ?, '9999', '9999', 'x', ?)").run(summary.from, summary.to, summary.to, JSON.stringify(legacy));
+    const run = latestRun(db);
+    expect(run?.id).toBe("legacy");
+    expect(run?.summary.gateway_report).toBeNull();
+    expect(run?.summary.matched.bank_gateway_report_credits).toBe(0);
+
+    const dir = mkdtempSync(join(tmpdir(), "closeloop-cfg-"));
+    for (const f of ["windows", "fees", "matching", "generator", "ai"]) writeFileSync(join(dir, `${f}.json`), readFileSync(new URL(`../../../config/${f}.json`, import.meta.url)));
+    expect(loadConfig(dir).gateway.razorpay).toEqual({ recon_page_size: 100, csv_header_aliases: {} });
   });
 });
