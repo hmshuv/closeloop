@@ -32,7 +32,24 @@ describe("evaluation harness", () => {
     expect(md).toContain("## Exceptions: precision and recall per type");
     expect(md).toContain("Coverage shortfall");
     const block = renderReadmeResults(result);
-    expect(block.split("\n")).toHaveLength(3);
+    expect(block.split("\n")).toHaveLength(4);
     expect(block).toContain("EVAL.md");
+    expect(md).toContain("## Gateway recon report vs amount-only (held-out)");
+    expect(block).toMatch(/With Razorpay's settlement recon report/);
+  });
+
+  it("compares held-out with and without the gateway report on identical data", () => {
+    for (const { gateway } of result.runs) {
+      const { amount_only: a, with_report: w } = gateway;
+      // Same data, same truth: the denominators agree, and every batched credit lands in exactly one outcome.
+      expect(w.batch.n).toBe(a.batch.n);
+      expect(w.credits.truth_linked).toBe(a.credits.truth_linked);
+      for (const m of [a, w]) expect(m.batch.correct + m.batch.wrong + m.batch.ambiguous + m.batch.conflict + m.batch.report_mismatch + m.batch.unresolved).toBe(m.batch.n);
+      // The report agrees with the bank by construction: no mismatches, no wrong sets, nothing left ambiguous.
+      expect(w.queue.gateway_report_mismatch).toBe(0);
+      expect(w.batch.wrong + w.batch.ambiguous + w.batch.conflict).toBe(0);
+      expect(w.batch.correct).toBeGreaterThanOrEqual(a.batch.correct);
+      expect(w.unresolved_in_batch).toBe(0);
+    }
   });
 });

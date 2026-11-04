@@ -1,6 +1,6 @@
 {
   "name": "closeloop-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "MCP server for month-end reconciliation of Razorpay-style gateway settlements against the bank statement and the ledger. Deterministic matching (exact, fuzzy UTR, batch decomposition) with a constrained AI layer.",
   "type": "module",
   "license": "MIT",

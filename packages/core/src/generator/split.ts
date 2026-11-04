@@ -21,6 +21,7 @@ export function partitionDataset(ds: Dataset): Record<Split, Dataset> {
       labels: ds.labels.filter((l) => l.split === split),
       links: ds.links.filter((l) => l.split === split),
       splitOf: new Map([...ds.splitOf].filter(([, s]) => s === split)),
+      payouts: ds.payouts.filter((p) => p.split === split),
     };
   }
   return out;

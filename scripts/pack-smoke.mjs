@@ -52,7 +52,11 @@ async function installAndRun(tarball) {
   console.log(`pack-smoke: installed into ${app} (no repo, fresh node_modules, --ignore-scripts)`);
 
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LLM_") && !k.startsWith("CLOSELOOP_")));
-  const child = spawn(npx, ["--no-install", "closeloop-mcp"], { cwd: app, env: { ...env, HOME: app, USERPROFILE: app, CLOSELOOP_DB: join(app, "state.db") }, stdio: ["pipe", "pipe", "pipe"] });
+  const runEnv = { ...env, HOME: app, USERPROFILE: app, CLOSELOOP_DB: join(app, "state.db") };
+  // The synthetic Razorpay recon report, written by the installed package itself (CSV path exercises the CSV parser).
+  const report = join(app, "recon.synthetic.csv");
+  execFileSync(npx, ["--no-install", "closeloop-mcp", "demo-report", report], { cwd: app, env: runEnv, stdio: ["ignore", "ignore", "inherit"] });
+  const child = spawn(npx, ["--no-install", "closeloop-mcp"], { cwd: app, env: runEnv, stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (d) => (stdout += d));
@@ -77,12 +81,20 @@ async function installAndRun(tarball) {
   send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "decompose_bank_credit", arguments: { bank_line_id: "bnk_000080" } } });
   const tools = await waitFor(2);
   const call = await waitFor(3);
+  send({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "import_razorpay_recon", arguments: { file_path: report } } });
+  const imported = await waitFor(4);
+  send({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "run_reconciliation", arguments: { from: "2026-10-01", to: "2026-10-31" } } });
+  const run = await waitFor(5);
   child.kill();
 
   for (const l of lines()) if (JSON.parse(l).jsonrpc !== "2.0") fail(`non-JSON-RPC line on stdout: ${l}`);
-  if (tools.result?.tools?.length !== 9) fail(`expected 9 tools, got ${tools.result?.tools?.length}`);
+  if (tools.result?.tools?.length !== 10) fail(`expected 10 tools, got ${tools.result?.tools?.length}`);
   if (call.result?.isError) fail(`tool call failed: ${call.result.content?.[0]?.text}`);
+  if (imported.result?.isError || !(imported.result?.structuredContent?.inserted > 0)) fail(`import_razorpay_recon failed: ${imported.result?.content?.[0]?.text}`);
+  if (!(run.result?.structuredContent?.matched?.bank_credits_batch_gateway_report > 0)) fail(`no BATCH_FROM_GATEWAY_REPORT matches after import: ${run.result?.content?.[0]?.text}`);
   console.log(`pack-smoke: ${tools.result.tools.length} tools; decompose_bank_credit → ${call.result.content[0].text.split("\n")[0]}`);
+  console.log(`pack-smoke: import_razorpay_recon → ${imported.result.content[0].text.split("\n")[0]}`);
+  console.log(`pack-smoke: run_reconciliation with the report → ${run.result.structuredContent.matched.bank_credits_batch_gateway_report} credits matched from the gateway report`);
   console.log("pack-smoke: stderr:\n" + stderr.trim());
   console.log(`pack-smoke: OK on Node ${process.version} (${process.platform}/${process.arch})`);
 }

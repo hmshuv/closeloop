@@ -92,6 +92,7 @@ export const EXCEPTION_TYPES = [
   "UNIDENTIFIED_BANK_CREDIT",
   "MATCH_CONFLICT",
   "BANK_LEDGER_MISMATCH",
+  "GATEWAY_REPORT_MISMATCH",
 ] as const;
 export const ExceptionTypeSchema = z.enum(EXCEPTION_TYPES);
 export type ExceptionType = z.infer<typeof ExceptionTypeSchema>;

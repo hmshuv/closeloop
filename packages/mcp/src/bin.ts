@@ -1,9 +1,11 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildSyntheticReconReport,
   defaultDbPath,
+  reconReportJson,
   generateDataset,
   loadConfig,
   loadDataset,
@@ -11,6 +13,9 @@ import {
   openReconDb,
   openTruthDb,
   providerFromEnv,
+  razorpayCredentialsFromEnv,
+  RazorpayReadOnlyClient,
+  reconItemsToCsv,
   runReconciliationWithAI,
   truthDbPathFor,
   type CloseLoopConfig,
@@ -24,9 +29,12 @@ import { createCloseLoopServer, runOutput } from "./server.ts";
 const USAGE = `closeloop-mcp            start the MCP server on stdio
 closeloop-mcp check      seed if empty, run one reconciliation, print the summary to stderr, exit
 closeloop-mcp seed PATH  write the demo dataset as a standalone source DB (for CLOSELOOP_SOURCE_DB)
+closeloop-mcp demo-report PATH  write a SYNTHETIC Razorpay settlement recon report (.json or .csv) for the
+                         demo dataset, in the documented recon/combined format, for import_razorpay_recon
 
 Environment: CLOSELOOP_DB (state DB, default ~/.closeloop/closeloop.db), CLOSELOOP_SOURCE_DB (read-only
-financial data), LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_REASONING_EFFORT (optional).`;
+financial data), LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_REASONING_EFFORT (optional),
+CLOSELOOP_RAZORPAY_KEY_ID / CLOSELOOP_RAZORPAY_KEY_SECRET (optional; read-only recon fetching, GET only).`;
 
 // Installed from npm, the default config ships next to the bundle (dist/../config). In the repo, core's
 // own default (the repo's config/) applies. CLOSELOOP_CONFIG_DIR always wins.
@@ -62,6 +70,14 @@ function seed(path: string, cfg: CloseLoopConfig): void {
   log(`wrote demo source DB ${path} (${ds.payments.length} payments, ${ds.settlements.length} settlements)`);
 }
 
+/** The demo dataset's settlements as Razorpay would report them. Synthetic, and labelled so in every row. */
+function demoReport(path: string, cfg: CloseLoopConfig): void {
+  const report = buildSyntheticReconReport(generateDataset({ seed: DEMO_SEED, config: cfg }));
+  const body = /\.csv$/i.test(path) ? reconItemsToCsv(report.items) : reconReportJson(report);
+  writeFileSync(path, body);
+  log(`wrote SYNTHETIC Razorpay recon report ${path} (${report.count} rows, demo seed ${DEMO_SEED}); import it with import_razorpay_recon`);
+}
+
 async function main(): Promise<void> {
   const [command, arg] = process.argv.slice(2);
   // Claude Desktop starts servers from an arbitrary working directory, so also read ~/.closeloop/.env.
@@ -73,6 +89,10 @@ async function main(): Promise<void> {
   if (command === "seed") {
     if (!arg) throw new Error("usage: closeloop-mcp seed PATH");
     return seed(arg, cfg);
+  }
+  if (command === "demo-report") {
+    if (!arg) throw new Error("usage: closeloop-mcp demo-report PATH(.json|.csv)");
+    return demoReport(arg, cfg);
   }
   if (command && command !== "check") throw new Error(`unknown command "${command}"\n${USAGE}`);
 
@@ -86,9 +106,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const server = createCloseLoopServer({ db, cfg, provider, confirmations: new ConfirmationStore() });
+  const creds = razorpayCredentialsFromEnv(process.env);
+  const razorpay = creds ? new RazorpayReadOnlyClient(creds) : null;
+  const server = createCloseLoopServer({ db, cfg, provider, confirmations: new ConfirmationStore(), razorpay });
   await server.connect(new StdioServerTransport());
-  log(`ready · db ${path} · ${provider ? `LLM ${provider.model}` : "no LLM (deterministic only, no outbound network calls)"}`);
+  const network = [provider ? `LLM ${provider.model}` : null, razorpay ? "Razorpay API read-only (GET recon/settlements)" : null].filter(Boolean);
+  log(`ready · db ${path} · ${network.length ? network.join(" · ") : "no LLM, no gateway API (deterministic only, no outbound network calls)"}`);
   const shutdown = () => {
     db.close();
     process.exit(0);

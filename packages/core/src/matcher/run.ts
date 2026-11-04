@@ -22,6 +22,8 @@ export const ReconSummarySchema = z.object({
     bank_fuzzy: z.number().int(),
     bank_batch_contiguous_credits: z.number().int(),
     bank_batch_credits: z.number().int(),
+    /** Batched credits linked from the gateway recon report's item-level rows (0 without a report). */
+    bank_gateway_report_credits: z.number().int(),
     bank_batch_settlements: z.number().int(),
     ledger_by_reference: z.number().int(),
     ledger_by_attributes: z.number().int(),
@@ -55,6 +57,21 @@ export const ReconSummarySchema = z.object({
     budget_exhausted: z.number().int(),
     max_pool: z.number().int(),
   }),
+  /** Null when no gateway recon report was imported: batches were matched on amounts alone. */
+  gateway_report: z
+    .object({
+      rows: z.number().int(),
+      settlements_covered: z.number().int(),
+      payouts: z.number().int(),
+      matched: z.number().int(),
+      settlements_matched: z.number().int(),
+      located_by_utr: z.number().int(),
+      located_by_amount_and_date: z.number().int(),
+      mismatches: z.number().int(),
+      not_found: z.number().int(),
+      unknown_settlements: z.number().int(),
+    })
+    .nullable(),
   duration_ms: z.number().nonnegative(),
 });
 export type ReconSummary = z.infer<typeof ReconSummarySchema>;
@@ -70,8 +87,9 @@ export function summarize(runId: string, result: ReconResult, from: string, to: 
   }
   const kinds = Object.fromEntries(MATCH_KINDS.map((k) => [k, new Set<string>()])) as Record<MatchKind, Set<string>>;
   const matches = result.matches.filter((m) => inPeriod(m.anchor_date));
-  for (const m of matches) kinds[m.kind].add(m.kind === "BATCH" || m.kind === "BATCH_CONTIGUOUS" ? m.right.id : `${m.left.id}>${m.right.id}`);
-  const batchSettlements = matches.filter((m) => m.kind === "BATCH" || m.kind === "BATCH_CONTIGUOUS").length;
+  const isBatch = (k: MatchKind) => k === "BATCH" || k === "BATCH_CONTIGUOUS" || k === "BATCH_FROM_GATEWAY_REPORT";
+  for (const m of matches) kinds[m.kind].add(isBatch(m.kind) ? m.right.id : `${m.left.id}>${m.right.id}`);
+  const batchSettlements = matches.filter((m) => isBatch(m.kind)).length;
   return {
     run_id: runId,
     from,
@@ -83,6 +101,7 @@ export function summarize(runId: string, result: ReconResult, from: string, to: 
       bank_fuzzy: kinds.FUZZY.size,
       bank_batch_contiguous_credits: kinds.BATCH_CONTIGUOUS.size,
       bank_batch_credits: kinds.BATCH.size,
+      bank_gateway_report_credits: kinds.BATCH_FROM_GATEWAY_REPORT.size,
       bank_batch_settlements: batchSettlements,
       ledger_by_reference: kinds.LEDGER_REF.size,
       ledger_by_attributes: kinds.LEDGER_ATTR.size,
@@ -109,6 +128,7 @@ export function summarize(runId: string, result: ReconResult, from: string, to: 
       budget_exhausted: result.batch.budget_exhausted,
       max_pool: result.batch.max_pool,
     },
+    gateway_report: result.gateway,
     duration_ms: Math.round(result.durationMs),
   };
 }

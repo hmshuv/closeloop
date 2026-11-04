@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BatchDiagram } from "@/components/batch-diagram";
 import { Badge, Card, type Tone } from "@/components/ui";
 import { dateLabel, KIND_LABEL } from "@/lib/format";
-import { snapshot, type Decomposition } from "@/lib/snapshot";
+import { reportModeBatchFor, snapshot, type Decomposition } from "@/lib/snapshot";
 
 const isSinglePayout = (b: Decomposition) => b.status === "decomposed" && b.settlements.length === 1;
 
@@ -14,6 +14,7 @@ function statusBadge(b: Decomposition): [string, Tone] {
     human_approved: ["Human approved", "green"],
     ambiguous: ["Ambiguous: needs a human", "amber"],
     conflict: ["Match conflict: needs a human", "rose"],
+    report_mismatch: ["Gateway report disagrees with the bank", "rose"],
     suggested: ["Suggested match", "amber"],
     unidentified: ["Unidentified", "rose"],
   };
@@ -46,7 +47,7 @@ export function compactLine(b: Decomposition): string {
   const n = b.settlements.length;
   const plural = (k: number, word: string) => `${k} ${word}${k === 1 ? "" : "s"}`;
   if (b.status === "decomposed" || b.status === "human_approved") {
-    const how = isSinglePayout(b) ? "single payout" : b.match_kind === "BATCH_CONTIGUOUS" ? "contiguous run" : b.match_kind === "BATCH" ? "proven-unique subset" : "human-approved set";
+    const how = isSinglePayout(b) ? "single payout" : b.match_kind === "BATCH_CONTIGUOUS" ? "contiguous run" : b.match_kind === "BATCH" ? "proven-unique subset" : b.match_kind === "BATCH_FROM_GATEWAY_REPORT" ? "from gateway report" : "human-approved set";
     return [plural(n, "settlement"), how, credit, `difference ${b.difference_vs_credit?.amount_inr ?? "—"}`].join(" · ");
   }
   if (b.status === "ambiguous") return [plural(b.candidate_sets.length, "candidate set"), "ambiguous", credit].join(" · ");
@@ -124,6 +125,8 @@ export function BatchView({ b }: { b: Decomposition }) {
           </div>
         )}
 
+        <ReportModePanel b={b} />
+
         {b.exception_id && s.details[b.exception_id] && (
           <Link href={`/exceptions/${b.exception_id}/`} className="inline-block text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">
             Open the exception, evidence and explanation →
@@ -131,6 +134,40 @@ export function BatchView({ b }: { b: Decomposition }) {
         )}
       </div>
     </Card>
+  );
+}
+
+/** What the (synthetic) gateway recon report decides for this credit, recorded by the snapshot's report-mode run. */
+function ReportModePanel({ b }: { b: Decomposition }) {
+  const r = reportModeBatchFor(b.bank_line.id);
+  if (!r || (r.match_kind !== "BATCH_FROM_GATEWAY_REPORT" && r.status !== "report_mismatch")) return null;
+  const ids = (x: { settlement_id: string }[]) => x.map((v) => v.settlement_id).sort().join(",");
+  const same = b.settlements.length > 0 && ids(b.settlements) === ids(r.settlements);
+  const candidate = b.candidate_sets.find((c) => c.settlement_ids.slice().sort().join(",") === ids(r.settlements));
+  const verdict =
+    r.status === "report_mismatch"
+      ? "The report and the bank disagree, so nothing is matched."
+      : same
+        ? "Same settlements as the amount-only match, now confirmed by the gateway's own rows."
+        : b.status === "ambiguous"
+          ? candidate
+            ? `Resolves the ambiguity: the payout is candidate set #${candidate.index + 1}.`
+            : "Resolves the ambiguity with a set that was not among the ranked candidates."
+          : b.status === "conflict"
+            ? "Resolves the conflict: the report shows which credit really paid the disputed settlement."
+            : "The report links a different set of settlements than the amount-only match.";
+  return (
+    <div className={`space-y-3 rounded-lg border p-3 ${r.status === "report_mismatch" ? "border-rose-200 dark:border-rose-900" : "border-emerald-200 dark:border-emerald-900"}`}>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-semibold">With the gateway recon report</span>
+        <Badge tone={r.status === "report_mismatch" ? "rose" : "green"}>{r.status === "report_mismatch" ? "Report ↔ bank mismatch" : KIND_LABEL.BATCH_FROM_GATEWAY_REPORT}</Badge>
+        <Badge tone="amber">Synthetic report</Badge>
+      </div>
+      <p className="text-xs text-zinc-700 dark:text-zinc-300">
+        {verdict} {r.summary}
+      </p>
+      {r.settlements.length > 0 && <BatchDiagram creditPaise={r.bank_line.credit.amount_paise} creditInr={r.bank_line.credit.amount_inr} settlements={r.settlements} label={`Bank credit ${r.bank_line.id} · gateway report`} />}
+    </div>
   );
 }
 

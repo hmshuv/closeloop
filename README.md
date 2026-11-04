@@ -37,15 +37,17 @@ flowchart LR
     B["Bank statement"]
     L["Ledger export (Tally / Zoho style)"]
   end
+  R["Gateway recon report (optional): Razorpay recon/combined export, or fetched read-only"]
   subgraph ENG["Deterministic engine (source of truth)"]
     direction TB
-    E1["1 · Items: fee + 18% GST on fee"] --> E2a["2a · Exact UTR"] --> E2c["2c · Fuzzy UTR (edit distance)"] --> E2b["2b · Batch: contiguous run → proof-only subset-sum"] --> E3["3 · Bank ↔ ledger + period tie-out"] --> E4["4 · T+n business-day windows"]
+    E1["1 · Items: fee + 18% GST on fee"] --> E2a["2a · Exact UTR"] --> E2r["2r · Payouts from the gateway report"] --> E2c["2c · Fuzzy UTR (edit distance)"] --> E2b["2b · Batch: contiguous run → proof-only subset-sum"] --> E3["3 · Bank ↔ ledger + period tie-out"] --> E4["4 · T+n business-day windows"]
   end
+  R -- "item-level links, checked to the paisa" --> E2r
   SRC --> ENG --> ST[("State: runs · matches · exceptions · audit (append-only)")]
   AI["Constrained AI layer: narration hints · explanations · draft journals"]
   ST -- "read-only evidence" --> AI
   AI -- "grounded candidate tokens only" --> E2c
-  MCP["MCP server (stdio): 9 tools · resource · prompt"] --> ENG
+  MCP["MCP server (stdio): 10 tools · resource · prompt"] --> ENG
   MCP --> ST
   C["Claude Desktop / any MCP client"] <--> MCP
   H["Human reviewer"] -- "two-step approve / escalate" --> MCP
@@ -125,6 +127,7 @@ It has no database, no API routes, no LLM calls at runtime and no secrets. Deplo
 - exposure by class
 - throughput
 - categorised held-out misses
+- held-out reconciled twice on identical data, amount-only and with a synthetic gateway recon report, scored from truth links only
 
 CI runs a 5k-payment smoke version on every push.
 
@@ -141,8 +144,9 @@ CI runs a 5k-payment smoke version on every push.
 | `approve_suggestion({id, candidate_index?, set_index?, confirm_token?, reviewer?})` | Two-step human approval: preview + token (5 min), then token + reviewer | destructive |
 | `escalate({id, note?, confirm_token?, reviewer?})` | Two-step human escalation with a note | destructive |
 | `get_audit_trail({entity_id?, limit?, cursor?})` | Append-only audit events, paginated | read-only |
+| `import_razorpay_recon({file_path?} \| {from, to})` | Load Razorpay's settlement recon report from a JSON/CSV export, or fetch it read-only from the API | writes gateway report rows (insert-only) |
 
-Also: resource `closeloop://summary/latest` and prompt `month_end_review({month?})`. Every amount comes as raw `amount_paise` plus a pre-formatted `amount_inr` (₹12,33,701.15), and every response starts with a one-line summary, so the model never does arithmetic. On first run with an empty database the server seeds the reproducible demo dataset into `~/.closeloop/closeloop.db` (override with `CLOSELOOP_DB`). Subcommands: `closeloop-mcp check` (one reconciliation, summary to stderr) and `closeloop-mcp seed PATH` (write the demo data as a standalone source DB).
+Also: resource `closeloop://summary/latest` and prompt `month_end_review({month?})`. Every amount comes as raw `amount_paise` plus a pre-formatted `amount_inr` (₹12,33,701.15), and every response starts with a one-line summary, so the model never does arithmetic. On first run with an empty database the server seeds the reproducible demo dataset into `~/.closeloop/closeloop.db` (override with `CLOSELOOP_DB`). Subcommands: `closeloop-mcp check` (one reconciliation, summary to stderr) `closeloop-mcp seed PATH` (write the demo data as a standalone source DB) and `closeloop-mcp demo-report PATH` (write a synthetic Razorpay recon report for the demo data, `.json` or `.csv`).
 
 **MCP Inspector:**
 
@@ -151,6 +155,41 @@ npx @modelcontextprotocol/inspector node packages/mcp/dist/closeloop-mcp.js     
 npx @modelcontextprotocol/inspector --cli node packages/mcp/dist/closeloop-mcp.js \
   --method tools/call --tool-name decompose_bank_credit --tool-arg bank_line_id=bnk_000080
 ```
+
+## Using with Razorpay's official MCP server
+
+[Razorpay's MCP server](https://github.com/razorpay/razorpay-mcp-server) gives Claude access to a merchant's Razorpay account: payments, orders, refunds and settlements, including the settlement recon report (`fetch_settlement_recon_details`). CloseLoop does something different with that data: it reconciles settlements against the bank statement and the books. The two run side by side in Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "razorpay": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "-e", "RAZORPAY_KEY_ID", "-e", "RAZORPAY_KEY_SECRET", "-e", "READ_ONLY", "razorpay/mcp"],
+      "env": { "RAZORPAY_KEY_ID": "rzp_live_…", "RAZORPAY_KEY_SECRET": "…", "READ_ONLY": "true" }
+    },
+    "closeloop": {
+      "command": "npx",
+      "args": ["-y", "closeloop-mcp"],
+      "env": { "CLOSELOOP_RAZORPAY_KEY_ID": "rzp_live_…", "CLOSELOOP_RAZORPAY_KEY_SECRET": "…" }
+    }
+  }
+}
+```
+
+The Razorpay block follows its README (Docker image; `READ_ONLY` is its read-only mode). Razorpay also hosts a remote server at `https://mcp.razorpay.com/mcp`; see its README for that setup.
+
+**Who does what.** Use Razorpay's server to look things up: a payment's status, a refund, one settlement's details. Use CloseLoop to close the month: `import_razorpay_recon` loads the recon report, and `run_reconciliation` then matches each batched bank credit from the report's item-level rows (`BATCH_FROM_GATEWAY_REPORT`) instead of guessing from amounts. A typical session: *"Import Razorpay's settlement recon for October, reconcile October, and tell me what's still open"*, then *"Look up settlement setl_… in Razorpay"* for anything that needs the gateway's side.
+
+**Getting the report into CloseLoop.** Don't route thousands of recon rows through the chat. CloseLoop takes the report directly, in one of two ways:
+- **Read-only API fetch:** give CloseLoop its own keys (`CLOSELOOP_RAZORPAY_KEY_ID`, `CLOSELOOP_RAZORPAY_KEY_SECRET`), then call `import_razorpay_recon({from, to})`. The variable names differ from Razorpay's own server so that CloseLoop never picks up keys meant for another process.
+- **Export file:** `import_razorpay_recon({file_path})` with JSON in the API's `recon/combined` format, or CSV with the API's field names as headers. Amounts must be integers in paise, as the API returns them: a rupee-denominated column is rejected rather than misread 100×.
+
+**Recon fetching is read-only.** CloseLoop's Razorpay client can only send `GET` to two documented endpoints, `/v1/settlements/recon/combined` and `/v1/settlements`. It has no method that sends a request body or uses another HTTP verb, and a test asserts that every request it makes is a GET. Keys come from the environment only and never appear in tool output or the audit trail. Imported rows go into insert-only tables in CloseLoop's state DB, never into the financial source data, and re-importing the same rows is a no-op.
+
+**Amounts still have to agree.** The report decides *which* settlements a bank credit contains. CloseLoop still checks Σ settlements = Σ report rows (credit − debit) = the bank credit, to the paisa. If the report and the bank disagree, nothing is matched, and a `GATEWAY_REPORT_MISMATCH` exception goes to a human.
+
+**Try it without a Razorpay account.** `npx -y closeloop-mcp demo-report ~/closeloop-recon.synthetic.json` writes a **synthetic** recon report for the demo data in the documented format; every row says so in `notes`. The same report is committed in [fixtures/razorpay/](fixtures/razorpay/) as JSON and CSV. Ask Claude to import it, then reconcile again. On held-out data the eval measures what the report changes (see the Results line above and [EVAL.md](EVAL.md)).
 
 ## LLM setup (optional)
 
@@ -187,7 +226,8 @@ docker compose run --rm -T closeloop    # attach an MCP client over stdio
 
 - **Read-only data mounts.** Point `CLOSELOOP_SOURCE_DB` at the customer's export, mounted `:ro`. CloseLoop attaches it read-only and keeps its own state (runs, exceptions, audit, drafts) in a separate database on a writable volume (`CLOSELOOP_DB`). Writes to source data fail at the storage layer, not just in code. The export must be a SQLite file in rollback-journal mode (not WAL) to be readable from a read-only mount.
 - **Hardened container.** Non-root user (uid 10001), read-only root filesystem with a tmpfs `/tmp`, nothing listening on a port. The MCP transport is stdin/stdout.
-- **No outbound calls when the LLM is disabled.** With no `LLM_*` variables the code makes no network requests, and the default compose service runs with `network_mode: none` to guarantee it. The LLM is opt-in through environment variables only (`docker compose --profile llm up closeloop-llm` reads `.env`).
+- **No outbound calls when the LLM and the Razorpay fetch are disabled.** With no `LLM_*` or `CLOSELOOP_RAZORPAY_*` variables the code makes no network requests, and the default compose service runs with `network_mode: none` to guarantee it. The LLM is opt-in through environment variables only (`docker compose --profile llm up closeloop-llm` reads `.env`).
+- **Gateway reports inside the network.** With `network_mode: none`, import Razorpay's recon report from an export file mounted read-only. The API fetch needs outbound HTTPS to `api.razorpay.com` only.
 - **What leaves when the LLM is on.** Explanation and drafting prompts contain the evidence records, including narrations. To keep data inside the customer's network, point `LLM_BASE_URL` at a self-hosted OpenAI-compatible endpoint (vLLM, Ollama, an internal gateway).
 - **Connecting a client** to the containerised server:
   ```json
@@ -207,7 +247,8 @@ Running the AI layer against a real free-tier provider (Groq, `openai/gpt-oss-12
 
 - **Synthetic data only.** The generator and the matcher were written by the same person. Held-out noise variants the rules weren't written around reduce, but don't remove, that bias.
 - **Narrow scope.** Single currency (INR), one Razorpay-style gateway model, one bank account, no multi-entity books.
-- **No real connectors yet**: no bank-statement parsers, gateway settlement/payout API, or Tally/Zoho Books sync. Gateway payout reports would resolve most batch ambiguity, which amount-only decomposition can't (see EVAL.md).
+- **One gateway connector.** Razorpay's settlement recon report (export or read-only API) is supported. There are no other gateways, no bank-statement parsers and no Tally/Zoho Books sync. Without a report, batch matching falls back to amounts alone, which can't resolve every batch (see EVAL.md).
+- **The report is evaluated on synthetic data.** The eval's recon report is generated from the same synthetic data as the bank statement, so it never disagrees with the bank. Disagreement handling is covered by unit tests, not by the eval.
 - **The contiguous-batch rule is an assumption.** It holds for hold-and-release and scheduled payouts; when it's wrong, the match is wrong. EVAL.md counts how often.
 - **Approximate bank calendar.** The holiday list is illustrative and covers 2026 only.
 - **Single node, no authentication.** SQLite on one machine. Reviewer names are self-asserted, and confirmation tokens live in memory, so a restart forgets them.

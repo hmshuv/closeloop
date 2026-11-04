@@ -11,6 +11,7 @@ export const AUDIT_ACTIONS = [
   "journal_draft",
   "approval",
   "escalation",
+  "gateway_report_import",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

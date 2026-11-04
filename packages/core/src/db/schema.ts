@@ -190,11 +190,60 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_id, ts);
 `;
 
+/**
+ * Imported gateway reports (Razorpay settlement recon "recon/combined", fetched read-only or from an export).
+ * They live with engine state, not with the financial source, so they work with a read-only source mount.
+ * Insert-only; re-importing the same rows is a no-op (natural key below).
+ */
+const GATEWAY_DDL = `
+CREATE TABLE IF NOT EXISTS gateway_reports (
+  id          TEXT PRIMARY KEY,
+  gateway     TEXT NOT NULL CHECK (gateway = 'razorpay'),
+  source      TEXT NOT NULL CHECK (source IN ('api','file')),
+  origin      TEXT NOT NULL,
+  sha256      TEXT NOT NULL,
+  rows_read   INTEGER NOT NULL,
+  imported_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS gateway_recon_items (
+  entity_id      TEXT NOT NULL,
+  type           TEXT NOT NULL CHECK (type IN ('payment','refund','transfer','adjustment')),
+  settlement_id  TEXT NOT NULL,
+  settlement_utr TEXT,
+  amount_paise   INTEGER NOT NULL,
+  fee_paise      INTEGER NOT NULL,
+  tax_paise      INTEGER NOT NULL,
+  credit_paise   INTEGER NOT NULL CHECK (credit_paise >= 0),
+  debit_paise    INTEGER NOT NULL CHECK (debit_paise >= 0),
+  payment_id     TEXT,
+  settled_at     INTEGER NOT NULL,
+  settled_on     TEXT NOT NULL,
+  report_id      TEXT NOT NULL REFERENCES gateway_reports(id),
+  raw_json       TEXT NOT NULL,
+  PRIMARY KEY (entity_id, type, settlement_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_gateway_items_settlement ON gateway_recon_items(settlement_id);
+
+CREATE TABLE IF NOT EXISTS gateway_settlements (
+  id           TEXT PRIMARY KEY,
+  utr          TEXT,
+  amount_paise INTEGER NOT NULL,
+  fees_paise   INTEGER NOT NULL,
+  tax_paise    INTEGER NOT NULL,
+  status       TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  report_id    TEXT NOT NULL REFERENCES gateway_reports(id)
+) STRICT;
+`;
+
+export const GATEWAY_TABLES = ["gateway_reports", "gateway_recon_items", "gateway_settlements"] as const;
+
 /** Source data: dataset metadata + the insert-only financial tables. */
 export const FINANCIAL_SCHEMA = FINANCIAL_DDL + FINANCIAL_TABLES.map(insertOnlyTriggers).join("\n");
 
 /** Engine state: runs, matches, exceptions, reviews, AI outputs, drafts and the append-only audit log. */
-export const STATE_SCHEMA = RECON_OUTPUT_DDL + AI_AND_AUDIT_DDL + insertOnlyTriggers("audit_log");
+export const STATE_SCHEMA = RECON_OUTPUT_DDL + AI_AND_AUDIT_DDL + GATEWAY_DDL + ["audit_log", ...GATEWAY_TABLES].map(insertOnlyTriggers).join("\n");
 
 export const RECON_SCHEMA = FINANCIAL_SCHEMA + STATE_SCHEMA;
 

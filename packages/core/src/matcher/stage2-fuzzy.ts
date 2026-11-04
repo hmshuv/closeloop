@@ -44,7 +44,7 @@ export function stage2Fuzzy(state: BankState, cfg: CloseLoopConfig, extraTokens?
   const result: StageResult = { matches: [], exceptions: [] };
 
   for (const line of state.credits) {
-    if (state.resolvedCredits.has(line.id)) continue;
+    if (state.resolvedCredits.has(line.id) || state.heldCredits.has(line.id)) continue;
     const own = utrCandidateTokens(line.narration, f.min_token_length, f.max_token_length);
     // AI hints only add candidate tokens, and only grounded ones; the deterministic scorer below still decides.
     const hints = groundedTokens(line.narration, extraTokens?.get(line.id) ?? [], f.min_token_length, f.max_token_length);
@@ -52,7 +52,7 @@ export function stage2Fuzzy(state: BankState, cfg: CloseLoopConfig, extraTokens?
     if (tokens.length === 0) continue;
     const from = windowStart(line.txn_date, f.date_tolerance_business_days, cfg.calendar);
     const evidence = settlementsBetween(state, from, line.txn_date)
-      .filter((s) => !state.linked.has(s.id))
+      .filter((s) => !state.linked.has(s.id) && !state.heldSettlements.has(s.id))
       .map((s) => bestEvidence(s, tokens, cfg))
       .filter((e): e is Evidence => e !== null)
       .sort(

@@ -12,17 +12,24 @@ import {
   explainException,
   getAuditTrail,
   getEvidence,
+  importRazorpayRecon,
   IsoDateSchema,
   latestRun,
   loadException,
+  parseReconFile,
+  type RazorpayReadOnlyClient,
   runReconciliationWithAI,
   showcaseCases,
   suggestionCandidates,
+  SYNTHETIC_NOTE,
   type CloseLoopConfig,
   type Db,
   type LLMProvider,
   type ReconSummary,
 } from "@closeloop/core";
+import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { ConfirmationStore } from "./confirm.ts";
@@ -34,6 +41,7 @@ import {
   EvidenceOutput,
   ExplainOutput,
   HumanActionOutput,
+  ImportReconOutput,
   ListExceptionsOutput,
   RunOutput,
 } from "./schemas.ts";
@@ -43,12 +51,15 @@ export interface ServerContext {
   cfg: CloseLoopConfig;
   provider: LLMProvider | null;
   confirmations: ConfirmationStore;
+  /** Read-only Razorpay API client, when CLOSELOOP_RAZORPAY_KEY_ID / _SECRET are set. */
+  razorpay?: RazorpayReadOnlyClient | null;
 }
 
 const INSTRUCTIONS = [
   "CloseLoop reconciles Razorpay-style gateway settlements against the bank statement and the accounting ledger.",
   "All money is integer paise; every amount also comes pre-formatted as amount_inr (Indian grouping). Quote amount_inr and the totals the tools return; never do arithmetic on amounts yourself.",
   "Exposure is reported per class (AMOUNT_AT_RISK, AWAITING_SETTLEMENT, STRUCTURAL) and must never be added together.",
+  "If the user has Razorpay's settlement recon report (an export, or API keys configured for CloseLoop), import_razorpay_recon loads it so batched bank credits are matched from the gateway's own rows instead of amounts alone; then run run_reconciliation again.",
   "The deterministic engine decides every match. approve_suggestion and escalate are human actions: call once to get a preview and confirm_token, show the preview to the user, and only call again with confirm_token and the user's name as reviewer after they explicitly agree.",
 ].join(" ");
 
@@ -66,6 +77,7 @@ const LABELS: Record<string, string> = {
   UNIDENTIFIED_BANK_CREDIT: "Bank credit with no matching settlement",
   MATCH_CONFLICT: "Batch and suggestion claim the same settlement",
   BANK_LEDGER_MISMATCH: "Ledger receipt disagrees with the bank",
+  GATEWAY_REPORT_MISMATCH: "Gateway recon report disagrees with the bank",
 };
 
 function respond<T extends { summary: string }>(data: T) {
@@ -93,9 +105,11 @@ export function runOutput(summary: ReconSummary, ai: string): z.infer<typeof Run
     summary:
       `${summary.from} → ${summary.to}: ${total} exceptions. ` +
       classes.map((c) => `${c.exposure_class} ${c.total.amount_inr} (${c.count})`).join(" · ") +
-      `. Matched ${m.bank_exact + m.bank_fuzzy + m.bank_batch_contiguous_credits + m.bank_batch_credits} bank credits ` +
-      `(${m.bank_exact} exact, ${m.bank_fuzzy} fuzzy, ${m.bank_batch_contiguous_credits + m.bank_batch_credits} batch covering ${m.bank_batch_settlements} settlements). ` +
-      `Bank vs books residual ${money(t.residual_paise).amount_inr}.`,
+      `. Matched ${m.bank_exact + m.bank_fuzzy + m.bank_batch_contiguous_credits + m.bank_batch_credits + m.bank_gateway_report_credits} bank credits ` +
+      `(${m.bank_exact} exact, ${m.bank_fuzzy} fuzzy, ${m.bank_batch_contiguous_credits + m.bank_batch_credits + m.bank_gateway_report_credits} batch covering ${m.bank_batch_settlements} settlements` +
+      `${summary.gateway_report ? `; ${m.bank_gateway_report_credits} of the batches from the gateway recon report` : ""}). ` +
+      `Bank vs books residual ${money(t.residual_paise).amount_inr}.` +
+      (summary.gateway_report ? "" : " Batches were matched on amounts alone; importing the gateway's recon report (import_razorpay_recon) would match them from item-level rows."),
     run_id: summary.run_id,
     period: { from: summary.from, to: summary.to },
     matched: {
@@ -104,6 +118,7 @@ export function runOutput(summary: ReconSummary, ai: string): z.infer<typeof Run
       bank_credits_fuzzy_utr: m.bank_fuzzy,
       bank_credits_batch_contiguous: m.bank_batch_contiguous_credits,
       bank_credits_batch_subset: m.bank_batch_credits,
+      bank_credits_batch_gateway_report: m.bank_gateway_report_credits,
       settlements_inside_batch_credits: m.bank_batch_settlements,
       ledger_receipts_by_reference: m.ledger_by_reference,
       ledger_receipts_by_attributes: m.ledger_by_attributes,
@@ -125,6 +140,7 @@ export function runOutput(summary: ReconSummary, ai: string): z.infer<typeof Run
       unexplained_residual: money(t.residual_paise),
     },
     batch_search: summary.batch,
+    gateway_report: summary.gateway_report,
     ai,
   };
 }
@@ -143,7 +159,7 @@ interface SettlementRow {
 
 export function createCloseLoopServer(ctx: ServerContext): McpServer {
   const { db } = ctx;
-  const server = new McpServer({ name: "closeloop", version: "0.1.1" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "closeloop", version: "0.2.0" }, { instructions: INSTRUCTIONS });
   const settlementsById = (ids: string[]) => {
     const get = db.prepare("SELECT id, utr, settled_at, created_at, amount_paise FROM settlements WHERE id = ?");
     return ids.map((id) => get.get(id) as SettlementRow | undefined).filter((s): s is SettlementRow => Boolean(s));
@@ -323,10 +339,10 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
       const run = await ensureRun(ctx);
       const credit = money(line.credit_paise);
       const matches = db
-        .prepare("SELECT kind, left_id, trace_json FROM matches WHERE run_id = ? AND right_id = ? AND left_type = 'settlement' AND kind IN ('EXACT','FUZZY','BATCH','BATCH_CONTIGUOUS','HUMAN_APPROVED') ORDER BY left_id")
+        .prepare("SELECT kind, left_id, trace_json FROM matches WHERE run_id = ? AND right_id = ? AND left_type = 'settlement' AND kind IN ('EXACT','FUZZY','BATCH','BATCH_CONTIGUOUS','BATCH_FROM_GATEWAY_REPORT','HUMAN_APPROVED') ORDER BY left_id")
         .all(run.id, line.id) as { kind: string; left_id: string; trace_json: string }[];
       const exc = db
-        .prepare("SELECT id, type, status, trace_json FROM exceptions WHERE run_id = ? AND primary_id = ? AND type IN ('AMBIGUOUS_BATCH','MATCH_CONFLICT','SUGGESTED_MATCH','UNIDENTIFIED_BANK_CREDIT') ORDER BY type LIMIT 1")
+        .prepare("SELECT id, type, status, trace_json FROM exceptions WHERE run_id = ? AND primary_id = ? AND type IN ('AMBIGUOUS_BATCH','MATCH_CONFLICT','GATEWAY_REPORT_MISMATCH','SUGGESTED_MATCH','UNIDENTIFIED_BANK_CREDIT') ORDER BY type LIMIT 1")
         .get(run.id, line.id) as { id: string; type: string; status: string; trace_json: string } | undefined;
       // What the exhaustive subset search concluded, from the engine's own trace.
       const fullSearch = (() => {
@@ -346,7 +362,16 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
         const sum = settlements.reduce((s, x) => s + x.amount_paise, 0);
         const kind = matches.some((m) => m.kind === "HUMAN_APPROVED") ? "HUMAN_APPROVED" : (matches[0]?.kind ?? "");
         const status = kind === "HUMAN_APPROVED" ? "human_approved" : kind.startsWith("BATCH") ? "decomposed" : "matched_single_settlement";
-        const how = kind === "BATCH_CONTIGUOUS" ? "a contiguous run of settlements (unique under the payout-model assumption)" : kind === "BATCH" ? "a proven-unique subset of settlements" : kind === "HUMAN_APPROVED" ? "a human-approved set" : `a ${kind.toLowerCase()} UTR match`;
+        const how =
+          kind === "BATCH_CONTIGUOUS"
+            ? "a contiguous run of settlements (unique under the payout-model assumption)"
+            : kind === "BATCH"
+              ? "a proven-unique subset of settlements"
+              : kind === "BATCH_FROM_GATEWAY_REPORT"
+                ? `the payout the gateway's recon report lists under UTR ${String((JSON.parse(matches[0]?.trace_json ?? "{}") as { settlement_utr?: string }).settlement_utr)}`
+                : kind === "HUMAN_APPROVED"
+                  ? "a human-approved set"
+                  : `a ${kind.toLowerCase()} UTR match`;
         return respond(
           DecomposeOutput.parse({
             ...base,
@@ -377,7 +402,25 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
             settlements_total: null,
             difference_vs_credit: null,
             candidate_sets: sets,
-            note: "Candidate sets are ranked by contiguity, then date closeness. A gateway payout report would settle it.",
+            note: "Candidate sets are ranked by contiguity, then date closeness. Importing the gateway's recon report (import_razorpay_recon) would settle it.",
+          }),
+        );
+      }
+      if (exc?.type === "GATEWAY_REPORT_MISMATCH") {
+        const trace = JSON.parse(exc.trace_json) as { settlement_ids?: string[]; settlement_utr?: string; report_net_paise?: number };
+        const settlements = settlementsById(trace.settlement_ids ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at));
+        const sum = settlements.reduce((s, x) => s + x.amount_paise, 0);
+        return respond(
+          DecomposeOutput.parse({
+            ...base,
+            summary: `${line.id} (${credit.amount_inr}) is the payout the gateway's recon report lists under UTR ${String(trace.settlement_utr)} (${settlements.length} settlements totalling ${money(sum).amount_inr}), but the amounts disagree by ${money(line.credit_paise - sum).amount_inr}, so nothing was matched (exception ${exc.id}).`,
+            status: "report_mismatch",
+            match_kind: null,
+            assumption: null,
+            settlements: settlements.map(settlementLine),
+            settlements_total: money(sum),
+            difference_vs_credit: money(line.credit_paise - sum),
+            note: "The gateway report and the bank must agree to the paisa before CloseLoop matches a payout. Ask the gateway for this payout's breakdown.",
           }),
         );
       }
@@ -408,6 +451,61 @@ export function createCloseLoopServer(ctx: ServerContext): McpServer {
           settlements_total: null,
           difference_vs_credit: null,
           note: "It may be a non-gateway receipt; identify the sender with the bank.",
+        }),
+      );
+    },
+  );
+
+  // ---------- import_razorpay_recon ----------
+  server.registerTool(
+    "import_razorpay_recon",
+    {
+      title: "Import Razorpay settlement recon",
+      description:
+        "Load Razorpay's settlement recon report (the documented /v1/settlements/recon/combined format; the same data Razorpay's own MCP server returns from fetch_settlement_recon_details) so batched bank credits are matched from the gateway's item-level rows (match kind BATCH_FROM_GATEWAY_REPORT) instead of amount-only subset search, and each settlement's payments and refunds are linked from the report. " +
+        "Pass file_path for a JSON or CSV export (CSV headers are the API field names; amounts in paise), or from/to (YYYY-MM-DD) to fetch it from the Razorpay API, which needs CLOSELOOP_RAZORPAY_KEY_ID and CLOSELOOP_RAZORPAY_KEY_SECRET in CloseLoop's own environment and only ever makes GET requests. " +
+        "Rows are stored insert-only and re-importing is a no-op. Run run_reconciliation afterwards to use the report.",
+      inputSchema: {
+        file_path: z.string().min(1).optional().describe("Path to a .json or .csv recon export; ~ is expanded"),
+        from: IsoDateSchema.optional().describe("Fetch from the Razorpay API: first settlement day, YYYY-MM-DD"),
+        to: IsoDateSchema.optional().describe("Fetch from the Razorpay API: last settlement day, YYYY-MM-DD"),
+      },
+      outputSchema: ImportReconOutput,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ file_path, from, to }) => {
+      if (Boolean(file_path) === Boolean(from || to)) throw new Error("Pass either file_path, or from and to (to fetch from the Razorpay API), not both.");
+      let items;
+      let settlements;
+      let source: "api" | "file";
+      let origin: string;
+      if (file_path) {
+        const path = resolve(file_path.replace(/^~(?=$|\/)/, homedir()));
+        if (statSync(path).size > 200 * 1024 * 1024) throw new Error(`${path} is larger than 200 MB; import it in monthly files.`);
+        items = parseReconFile(path, readFileSync(path, "utf8"));
+        source = "file";
+        origin = path;
+      } else {
+        if (!from || !to) throw new Error("Pass both from and to (YYYY-MM-DD).");
+        if (from > to) throw new Error(`from (${from}) must not be after to (${to})`);
+        if (!ctx.razorpay) throw new Error("No Razorpay API keys configured for CloseLoop. Set CLOSELOOP_RAZORPAY_KEY_ID and CLOSELOOP_RAZORPAY_KEY_SECRET in its environment, or pass file_path for an export.");
+        items = await ctx.razorpay.fetchRecon(from, to);
+        settlements = await ctx.razorpay.fetchSettlements(from, to);
+        source = "api";
+        origin = `api.razorpay.com GET /v1/settlements/recon/combined + /v1/settlements, ${from}..${to}`;
+      }
+      const r = importRazorpayRecon(db, items, { source, origin, settlements });
+      const synthetic = items.some((i) => JSON.stringify(i.notes ?? "").includes(SYNTHETIC_NOTE));
+      return respond(
+        ImportReconOutput.parse({
+          ...r,
+          summary:
+            `${synthetic ? "SYNTHETIC demo report. " : ""}Read ${r.rows_read} recon row(s) from ${source === "api" ? "the Razorpay API (read-only)" : origin}: ${r.inserted} new, ${r.duplicates} already imported` +
+            `${r.conflicts.length ? `, ${r.conflicts.length} conflicting with an earlier import (kept the earlier copy)` : ""}${r.unsettled ? `, ${r.unsettled} not yet settled (skipped)` : ""}. ` +
+            `Covers ${r.settlements_covered} settlement(s) paid under ${r.payout_utrs} bank transfer UTR(s)${r.settled_from ? `, settled ${r.settled_from} → ${r.settled_to}` : ""}. Run run_reconciliation to use it.`,
+          synthetic,
+          conflict_count: r.conflicts.length,
+          conflicts: r.conflicts.slice(0, 20),
         }),
       );
     },

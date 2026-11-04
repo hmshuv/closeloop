@@ -19,6 +19,7 @@
     "mcp:dev": "node packages/mcp/bin/dev.js",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "snapshot": "tsx scripts/snapshot.ts",
+    "fixtures": "tsx packages/mcp/src/bin.ts demo-report fixtures/razorpay/recon-combined.synthetic.json && tsx packages/mcp/src/bin.ts demo-report fixtures/razorpay/recon-combined.synthetic.csv",
     "dashboard:dev": "pnpm --filter dashboard dev",
     "dashboard:build": "pnpm --filter dashboard build"
   },

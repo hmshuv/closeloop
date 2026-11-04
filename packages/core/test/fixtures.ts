@@ -42,7 +42,7 @@ export function journal(id: string, date: string, amount: number, settlementId: 
 }
 
 export function source(partial: Partial<SourceData>): SourceData {
-  return { payments: [], refunds: [], settlements: [], items: [], bankLines: [], ledger: [], asOf: "2026-10-31", ...partial };
+  return { payments: [], refunds: [], settlements: [], items: [], gatewayReport: [], bankLines: [], ledger: [], asOf: "2026-10-31", ...partial };
 }
 
 export const neft = (utr: string) => `NEFT CR-${utr}-RAZORPAY SOFTWARE PVT LTD-SETTL MIDABCDEFGHJK`;

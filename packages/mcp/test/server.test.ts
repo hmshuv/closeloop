@@ -1,17 +1,17 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FINANCIAL_TABLES, formatINR, loadConfig, type Db } from "@closeloop/core";
+import { buildSyntheticReconReport, FINANCIAL_TABLES, formatINR, generateDataset, istDate, loadConfig, RazorpayReadOnlyClient, reconItemsToCsv, type Db } from "@closeloop/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { openDatabase } from "../src/bootstrap.ts";
+import { DEMO_SEED, openDatabase } from "../src/bootstrap.ts";
 import { CONFIRMATION_TTL_MS, ConfirmationStore } from "../src/confirm.ts";
-import { AuditOutput, DecomposeOutput, DraftOutput, EvidenceOutput, ExplainOutput, HumanActionOutput, ListExceptionsOutput, RunOutput } from "../src/schemas.ts";
+import { AuditOutput, DecomposeOutput, DraftOutput, EvidenceOutput, ExplainOutput, HumanActionOutput, ImportReconOutput, ListExceptionsOutput, RunOutput } from "../src/schemas.ts";
 import { createCloseLoopServer } from "../src/server.ts";
 
 const cfg = loadConfig();
@@ -59,12 +59,13 @@ beforeAll(async () => {
 });
 
 describe("tool catalogue", () => {
-  it("exposes the nine tools with honest annotations and nothing that deletes or edits records", async () => {
+  it("exposes the ten tools with honest annotations and nothing that deletes or edits records", async () => {
     const { tools } = await client.listTools();
     const by = new Map(tools.map((t) => [t.name, t]));
     expect([...by.keys()].sort()).toEqual(
-      ["approve_suggestion", "decompose_bank_credit", "draft_journal_entry", "escalate", "explain_exception", "get_audit_trail", "get_evidence", "list_exceptions", "run_reconciliation"].sort(),
+      ["approve_suggestion", "decompose_bank_credit", "draft_journal_entry", "escalate", "explain_exception", "get_audit_trail", "get_evidence", "import_razorpay_recon", "list_exceptions", "run_reconciliation"].sort(),
     );
+    expect(by.get("import_razorpay_recon")?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     for (const name of ["list_exceptions", "get_evidence", "decompose_bank_credit", "get_audit_trail"]) expect(by.get(name)?.annotations?.readOnlyHint).toBe(true);
     for (const name of ["approve_suggestion", "escalate"]) expect(by.get(name)?.annotations).toMatchObject({ destructiveHint: true, readOnlyHint: false });
     for (const t of tools) {
@@ -213,6 +214,79 @@ describe("two-step human actions", () => {
     const done = await ok(HumanActionOutput, "approve_suggestion", { id, confirm_token, reviewer: "Ravi" });
     expect(done.result).toMatchObject({ exception_id: id });
     expect(Array.isArray((done.result as { leftovers?: unknown }).leftovers)).toBe(true);
+  });
+});
+
+describe("Razorpay recon report", () => {
+  const report = buildSyntheticReconReport(generateDataset({ seed: DEMO_SEED, config: cfg }));
+  const requests: { method: string | undefined; url: string }[] = [];
+  /** Serves the synthetic report the way the recon and settlements endpoints would, recording every request. */
+  const fakeRazorpay = ((url: string, init?: RequestInit) => {
+    requests.push({ method: init?.method, url });
+    const q = new URL(url).searchParams;
+    const day = `${q.get("year")}-${String(q.get("month")).padStart(2, "0")}-${String(q.get("day")).padStart(2, "0")}`;
+    const all = new URL(url).pathname.endsWith("/recon/combined") ? report.items.filter((i) => i.settled_at !== null && istDate(i.settled_at) === day) : [];
+    const items = all.slice(Number(q.get("skip")), Number(q.get("skip")) + Number(q.get("count")));
+    return Promise.resolve(new Response(JSON.stringify({ entity: "collection", count: items.length, items }), { status: 200 }));
+  }) as unknown as typeof fetch;
+
+  async function connect(razorpay: RazorpayReadOnlyClient | null) {
+    const { db: own } = openDatabase(":memory:", cfg);
+    const server = createCloseLoopServer({ db: own, cfg, provider: null, confirmations: new ConfirmationStore(), razorpay });
+    const [c, s] = InMemoryTransport.createLinkedPair();
+    await server.connect(s);
+    const cl = new Client({ name: "test", version: "0" });
+    await cl.connect(c);
+    const run = async <S extends z.ZodTypeAny>(schema: S, name: string, args: Record<string, unknown> = {}) => {
+      const res = (await cl.callTool({ name, arguments: args })) as CallResult;
+      if (res.isError) throw new Error(res.content[0]?.text);
+      return schema.parse(res.structuredContent) as z.infer<S>;
+    };
+    return { own, run };
+  }
+
+  it("imports an export file, then matches batched credits from it without touching financial records", async () => {
+    const { own, run } = await connect(null);
+    const dir = mkdtempSync(join(tmpdir(), "closeloop-rzp-"));
+    writeFileSync(join(dir, "recon.json"), JSON.stringify(report));
+    writeFileSync(join(dir, "recon.csv"), reconItemsToCsv(report.items));
+    const before = await run(RunOutput, "run_reconciliation", { from: "2026-10-01", to: "2026-10-31" });
+    expect(before.gateway_report).toBeNull();
+    expect(before.summary).toMatch(/import_razorpay_recon/);
+    const financial = () => FINANCIAL_TABLES.map((t) => JSON.stringify(own.prepare(`SELECT * FROM ${t} ORDER BY id`).all())).join();
+    const snapshot = financial();
+
+    const imported = await run(ImportReconOutput, "import_razorpay_recon", { file_path: join(dir, "recon.json") });
+    expect(imported).toMatchObject({ source: "file", synthetic: true, inserted: report.count, duplicates: 0, conflict_count: 0 });
+    expect(imported.summary).toMatch(/^SYNTHETIC demo report/);
+    expect((await run(ImportReconOutput, "import_razorpay_recon", { file_path: join(dir, "recon.csv") })).duplicates).toBe(report.count);
+    expect(financial()).toBe(snapshot);
+
+    const after = await run(RunOutput, "run_reconciliation", { from: "2026-10-01", to: "2026-10-31" });
+    expect(after.matched.bank_credits_batch_gateway_report).toBeGreaterThan(0);
+    expect(after.gateway_report).toMatchObject({ mismatches: 0 });
+    expect(after.exceptions.by_type.find((t) => t.type === "MATCH_CONFLICT")).toBeUndefined();
+    const line = (own.prepare("SELECT right_id FROM matches WHERE kind = 'BATCH_FROM_GATEWAY_REPORT' ORDER BY right_id LIMIT 1").get() as { right_id: string }).right_id;
+    const d = await run(DecomposeOutput, "decompose_bank_credit", { bank_line_id: line });
+    expect(d).toMatchObject({ status: "decomposed", match_kind: "BATCH_FROM_GATEWAY_REPORT", full_search: null, difference_vs_credit: { amount_paise: 0 } });
+    expect(d.summary).toMatch(/recon report lists under UTR/);
+  });
+
+  it("fetches from the Razorpay API with GET requests only, when CloseLoop has its own keys", async () => {
+    requests.length = 0;
+    const { run } = await connect(new RazorpayReadOnlyClient({ keyId: "rzp_test_x", keySecret: "y" }, { fetch: fakeRazorpay }));
+    const r = await run(ImportReconOutput, "import_razorpay_recon", { from: "2026-10-01", to: "2026-10-31" });
+    expect(r).toMatchObject({ source: "api", synthetic: true });
+    expect(r.inserted).toBe(report.items.filter((i) => i.settled_at !== null && istDate(i.settled_at) >= "2026-10-01").length);
+    expect(r.origin).not.toMatch(/rzp_test_x/);
+    expect(requests.length).toBeGreaterThan(31);
+    expect(requests.every((q) => q.method === "GET")).toBe(true);
+  });
+
+  it("refuses an API fetch without keys, and ambiguous arguments", async () => {
+    const { run } = await connect(null);
+    await expect(run(ImportReconOutput, "import_razorpay_recon", { from: "2026-10-01", to: "2026-10-31" })).rejects.toThrow(/CLOSELOOP_RAZORPAY_KEY_ID/);
+    await expect(run(ImportReconOutput, "import_razorpay_recon", { file_path: "/x.json", from: "2026-10-01", to: "2026-10-31" })).rejects.toThrow(/either file_path/);
   });
 });
 

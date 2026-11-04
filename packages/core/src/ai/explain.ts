@@ -110,6 +110,16 @@ export function deterministicExplanation(bundle: EvidenceBundle): Explanation {
       explanation: `${e.subtype ?? "Mismatch"}: ${amount}.`,
       recommended_action: "Correct the ledger receipt so it equals the bank credit.",
     }),
+    GATEWAY_REPORT_MISMATCH: () => ({
+      root_cause:
+        e.subtype === "SETTLEMENT_TOTAL"
+          ? "The gateway's recon report does not add up to the settlement amount"
+          : e.subtype === "SETTLEMENT_MATCHED_ELSEWHERE"
+            ? "The gateway report puts a settlement in this payout, but the bank shows it paid separately"
+            : "The bank credit does not equal the payout the gateway's recon report describes",
+      explanation: `${e.subtype ?? "Mismatch"} of ${amount}. Gateway report total ${formatINR(num(t.report_net_paise))}; settlements total ${formatINR(num(t.settlements_total_paise ?? t.settlement_paise))}${typeof t.credit_paise === "number" ? `; bank credit ${formatINR(t.credit_paise)}` : ""}${typeof t.settlement_utr === "string" ? ` (payout UTR ${t.settlement_utr})` : ""}.`,
+      recommended_action: "Ask the gateway for the payout breakdown of this UTR and compare it with the bank statement before matching.",
+    }),
   };
   const pick = by[e.type]?.() ?? { root_cause: `${e.type} raised by ${String(t.rule)}`, explanation: JSON.stringify(t).slice(0, 2000), recommended_action: "Review the evidence." };
   return ExplanationSchema.parse({ ...base, ...pick });

@@ -1,7 +1,7 @@
 import { addBusinessDays } from "../calendar.ts";
 import { settlementWindow, type CloseLoopConfig } from "../config.ts";
 import { gatewayFee, gstOnFee, settlementBreakdown } from "../money.ts";
-import type { Payment } from "../types.ts";
+import type { Payment, SettlementItem } from "../types.ts";
 import type { ExceptionDraft, MatchDraft, SourceData, StageResult } from "./types.ts";
 
 export function amountSubtype(cfg: CloseLoopConfig, delta: number): "ROUNDING" | "MATERIAL" {
@@ -16,17 +16,37 @@ export interface Stage1Result extends StageResult {
   pendingInWindow: number;
 }
 
+/**
+ * With an imported gateway recon report, each settlement it covers takes its payment and refund links from the
+ * report's rows (gross = amount, GST = tax, net = credit − debit); other settlements keep their settlement items.
+ * Transfers and adjustments are not linked to payments but still count towards the settlement's total.
+ */
+export function itemsWithReport(src: SourceData): { items: SettlementItem[]; covered: Set<string>; otherNet: Map<string, number> } {
+  const covered = new Set(src.gatewayReport.map((r) => r.settlement_id));
+  const otherNet = new Map<string, number>();
+  const fromReport: SettlementItem[] = [];
+  for (const r of src.gatewayReport) {
+    const net = r.credit_paise - r.debit_paise;
+    if (r.type === "payment" || r.type === "refund") {
+      const sign = r.type === "payment" ? 1 : -1;
+      fromReport.push({ id: `report:${r.entity_id}`, settlement_id: r.settlement_id, entity_type: r.type, entity_id: r.entity_id, gross_paise: sign * r.amount_paise, fee_paise: r.fee_paise, gst_paise: r.tax_paise, net_paise: net });
+    } else otherNet.set(r.settlement_id, (otherNet.get(r.settlement_id) ?? 0) + net);
+  }
+  return { items: [...src.items.filter((i) => !covered.has(i.settlement_id)), ...fromReport], covered, otherNet };
+}
+
 /** Stage 1: payment/refund ↔ settlement item by id, with fee + GST arithmetic verified line by line. */
 export function stage1Items(src: SourceData, cfg: CloseLoopConfig): Stage1Result {
+  const { items, covered, otherNet } = itemsWithReport(src);
   const matches: MatchDraft[] = [];
   const exceptions: ExceptionDraft[] = [];
   const payments = new Map(src.payments.map((p) => [p.id, p]));
   const refunds = new Map(src.refunds.map((r) => [r.id, r]));
   const settlements = new Map(src.settlements.map((s) => [s.id, s]));
-  const netBySettlement = new Map<string, number>();
+  const netBySettlement = new Map<string, number>(otherNet);
   const settled = new Set<string>();
 
-  for (const item of src.items) {
+  for (const item of items) {
     netBySettlement.set(item.settlement_id, (netBySettlement.get(item.settlement_id) ?? 0) + item.net_paise);
     const settlement = settlements.get(item.settlement_id);
     if (!settlement) continue;
@@ -43,7 +63,7 @@ export function stage1Items(src: SourceData, cfg: CloseLoopConfig): Stage1Result
         confidence: 1,
         reason: "PAYMENT_IN_SETTLEMENT",
         anchor_date: date,
-        trace: { settlement_item_id: item.id },
+        trace: covered.has(settlement.id) ? { source: "gateway_report", entity_id: item.entity_id } : { settlement_item_id: item.id },
       });
       if (item.gross_paise !== p.amount_paise) {
         const delta = item.gross_paise - p.amount_paise;
@@ -101,7 +121,17 @@ export function stage1Items(src: SourceData, cfg: CloseLoopConfig): Stage1Result
 
   for (const s of src.settlements) {
     const net = netBySettlement.get(s.id) ?? 0;
-    if (net !== s.amount_paise) {
+    if (net !== s.amount_paise && covered.has(s.id)) {
+      exceptions.push({
+        type: "GATEWAY_REPORT_MISMATCH",
+        subtype: "SETTLEMENT_TOTAL",
+        amount_paise: Math.abs(s.amount_paise - net),
+        primary: { type: "settlement", id: s.id },
+        anchor_date: s.settled_at,
+        related: [],
+        trace: { rule: "stage1.settlement_equals_gateway_report", settlement_paise: s.amount_paise, report_net_paise: net, delta_paise: s.amount_paise - net },
+      });
+    } else if (net !== s.amount_paise) {
       const delta = s.amount_paise - net;
       exceptions.push({
         type: "AMOUNT_MISMATCH",

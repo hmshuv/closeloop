@@ -25,6 +25,7 @@ export const TYPE_LABEL: Record<string, string> = {
   UNIDENTIFIED_BANK_CREDIT: "Unidentified credit",
   MATCH_CONFLICT: "Match conflict",
   BANK_LEDGER_MISMATCH: "Bank ↔ ledger mismatch",
+  GATEWAY_REPORT_MISMATCH: "Gateway report ↔ bank mismatch",
 };
 
 export const CLASS_LABEL: Record<string, string> = {
@@ -44,6 +45,7 @@ export const KIND_LABEL: Record<string, string> = {
   FUZZY: "Fuzzy UTR",
   BATCH_CONTIGUOUS: "Contiguous batch",
   BATCH: "Proven-unique subset",
+  BATCH_FROM_GATEWAY_REPORT: "From gateway report",
   HUMAN_APPROVED: "Human approved",
 };
 

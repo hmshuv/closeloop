@@ -84,7 +84,7 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
   const suggestingLines = (settlementId: string) => [...state.suggestions].filter(([, ids]) => ids.includes(settlementId)).map(([line]) => line);
   const opts = { timeBudgetMs: b.time_budget_ms, nodeBudget: b.node_budget, mitmMaxN: b.mitm_max_n, maxSets: b.max_candidate_sets * 10, now };
   const poolFor = (line: BankLine) =>
-    settlementsBetween(state, windowStart(line.txn_date, b.window_business_days, cal), line.txn_date).filter((s) => !state.linked.has(s.id) && s.amount_paise > 0);
+    settlementsBetween(state, windowStart(line.txn_date, b.window_business_days, cal), line.txn_date).filter((s) => !state.linked.has(s.id) && !state.heldSettlements.has(s.id) && s.amount_paise > 0);
   const conflicts = new Map<string, { line: BankLine; members: Settlement[]; conflicting: Settlement[]; method: string }>();
   const reserve = (settlementId: string, lineId: string) => result.reserved.set(settlementId, [...(result.reserved.get(settlementId) ?? []), lineId]);
 
@@ -150,7 +150,7 @@ export function stage2Batch(state: BankState, cfg: CloseLoopConfig, now?: () => 
   };
 
   const byAmountDesc = (lines: BankLine[]) => lines.slice().sort((x, y) => y.credit_paise - x.credit_paise || x.id.localeCompare(y.id));
-  const open = () => byAmountDesc(state.credits.filter((c) => !state.resolvedCredits.has(c.id) && !state.suggestions.has(c.id) && !conflicts.has(c.id)));
+  const open = () => byAmountDesc(state.credits.filter((c) => !state.resolvedCredits.has(c.id) && !state.heldCredits.has(c.id) && !state.suggestions.has(c.id) && !conflicts.has(c.id)));
 
   // 2b-i: contiguous runs, repeated while consuming runs shrinks other credits' pools.
   for (let pass = 0; pass < b.max_passes; pass++) {

@@ -16,13 +16,31 @@ export interface SourceData {
   refunds: Refund[];
   settlements: Settlement[];
   items: SettlementItem[];
+  /** Rows of the gateway's settlement recon report (Razorpay "recon/combined"), if one was imported. Empty otherwise. */
+  gatewayReport: GatewayReportRow[];
   bankLines: BankLine[];
   ledger: LedgerEntry[];
   /** Records dated after this are invisible; windows are judged as of this date. */
   asOf: string;
 }
 
-export const MATCH_KINDS = ["ITEM", "EXACT", "FUZZY", "BATCH_CONTIGUOUS", "BATCH", "LEDGER_REF", "LEDGER_ATTR", "JOURNAL", "HUMAN_APPROVED"] as const;
+/** One recon-report row, normalised. Money in paise; `settled_on` is the IST date of the row's settled_at. */
+export interface GatewayReportRow {
+  entity_id: string;
+  type: "payment" | "refund" | "transfer" | "adjustment";
+  settlement_id: string;
+  /** UTR of the bank transfer that paid this settlement. Several settlements paid together share one. */
+  settlement_utr: string | null;
+  amount_paise: number;
+  fee_paise: number;
+  tax_paise: number;
+  credit_paise: number;
+  debit_paise: number;
+  payment_id: string | null;
+  settled_on: string;
+}
+
+export const MATCH_KINDS = ["ITEM", "EXACT", "FUZZY", "BATCH_CONTIGUOUS", "BATCH", "BATCH_FROM_GATEWAY_REPORT", "LEDGER_REF", "LEDGER_ATTR", "JOURNAL", "HUMAN_APPROVED"] as const;
 export const MatchKindSchema = z.enum(MATCH_KINDS);
 export type MatchKind = z.infer<typeof MatchKindSchema>;
 
@@ -32,6 +50,7 @@ export const REASON_CODES = [
   "FUZZY_UTR",
   "BATCH_CONTIGUOUS_RUN",
   "BATCH_DECOMPOSED",
+  "GATEWAY_REPORT_PAYOUT",
   "LEDGER_REFERENCE",
   "LEDGER_ATTRIBUTES",
   "JOURNAL_REFERENCE",

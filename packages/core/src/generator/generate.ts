@@ -73,6 +73,18 @@ export interface Dataset {
   links: TruthLink[];
   /** Entity id → split. Ground truth as well. */
   splitOf: Map<string, Split>;
+  /**
+   * Gateway-side payout records: the transfer UTR under which several settlements were paid out together.
+   * Not loaded into the recon DB; used only to build a synthetic gateway recon report (see gateway/fixture.ts).
+   */
+  payouts: GatewayPayout[];
+}
+
+export interface GatewayPayout {
+  utr: string;
+  date: string;
+  settlement_ids: string[];
+  split: Split;
 }
 
 /** Subscription-style price points: identical amounts make subset-sum ambiguity realistic. */
@@ -90,6 +102,7 @@ interface Ctx {
   splitOf: Map<string, Split>;
   labels: TruthLabel[];
   links: TruthLink[];
+  payouts: GatewayPayout[];
 }
 
 interface PaymentRec {
@@ -481,6 +494,7 @@ function buildCredits(ctx: Ctx, rng: Rng, drafts: SettlementDraft[], trapKeys: {
   const payout = (split: Split, date: string, members: SettlementDraft[], kind: NoiseKind, details: Record<string, unknown>) => {
     const utr = freshUtr(ctx, rng, date);
     const ids = members.map((m) => stl(m).id);
+    ctx.payouts.push({ utr, date, settlement_ids: ids, split });
     credit(split, date, sumPaise(members.map((m) => stl(m).amount_paise)), devNarration(rng, utr, ctx.mid), utr, ids, [{ kind, details: { settlement_ids: ids, ...details } }], kind === "CONSOLIDATED_CREDIT");
   };
 
@@ -822,6 +836,7 @@ export function generateDataset(options: GenerateOptions): Dataset {
     splitOf: new Map(),
     labels: [],
     links: [],
+    payouts: [],
   };
 
   const { recs, trapKeys } = buildPayments(ctx, root.fork("payments"), payments, days);
@@ -852,5 +867,6 @@ export function generateDataset(options: GenerateOptions): Dataset {
     labels: ctx.labels,
     links: ctx.links,
     splitOf: ctx.splitOf,
+    payouts: ctx.payouts,
   };
 }

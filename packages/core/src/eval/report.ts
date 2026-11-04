@@ -2,7 +2,7 @@ import { EXPOSURE_CLASSES } from "../matcher/types.ts";
 import { formatINR } from "../money.ts";
 import { EXCEPTION_TYPES, type Split } from "../types.ts";
 import type { EvalResult, SeedRun } from "./run.ts";
-import { BATCH_OUTCOMES, FUZZY_KINDS, FUZZY_OUTCOMES, type BatchOutcome, type Counts, type SplitScore } from "./score.ts";
+import { BATCH_OUTCOMES, FUZZY_KINDS, FUZZY_OUTCOMES, type BatchOutcome, type Counts, type ModeScore, type SplitScore } from "./score.ts";
 
 // ---------- aggregation ----------
 
@@ -47,8 +47,30 @@ export interface Headline {
   missing: { n: number; detected: number; deferred: number; missed: number };
   macroRecall: number;
   macroPrecision: number;
+  /** Exception types with at least one labelled case (the macro averages run over these). */
+  typesScored: number;
   recordsPerSecond: number;
 }
+
+/** Held-out pooled over seeds, amount-only vs with the synthetic gateway recon report. */
+export function gatewayComparison(r: EvalResult): { amount_only: ModeScore; with_report: ModeScore } {
+  const pool = (side: "amount_only" | "with_report"): ModeScore => {
+    const add = (a: Record<string, number>, b: Record<string, number>) => Object.fromEntries(Object.keys(a).map((k) => [k, (a[k] ?? 0) + (b[k] ?? 0)]));
+    return r.runs
+      .map((x) => x.gateway[side])
+      .reduce((acc, m) => ({
+        credits: add(acc.credits, m.credits) as ModeScore["credits"],
+        batch: add(acc.batch, m.batch) as ModeScore["batch"],
+        queue: add(acc.queue, m.queue) as ModeScore["queue"],
+        unresolved_in_batch: acc.unresolved_in_batch + m.unresolved_in_batch,
+        never_credited: add(acc.never_credited, m.never_credited) as ModeScore["never_credited"],
+        decoys: add(acc.decoys, m.decoys) as ModeScore["decoys"],
+      }));
+  };
+  return { amount_only: pool("amount_only"), with_report: pool("with_report") };
+}
+
+const queueSize = (m: ModeScore) => m.queue.ambiguous_batch + m.queue.match_conflict + m.queue.suggested_match + m.queue.gateway_report_mismatch;
 
 export function headline(r: EvalResult, split: Split): Headline {
   const per = scores(r, split);
@@ -76,6 +98,7 @@ export function headline(r: EvalResult, split: Split): Headline {
     },
     macroRecall: recall.length ? sum(recall) / recall.length : 0,
     macroPrecision: precision.length ? sum(precision) / precision.length : 0,
+    typesScored: types.length,
     recordsPerSecond: sum(per.map((s) => s.records)) / (sum(per.map((s) => s.reconcile_ms)) / 1000),
   };
 }
@@ -203,7 +226,37 @@ export function renderEvalMarkdown(r: EvalResult, meta: ReportMeta): string {
       }),
     ),
     "",
-    "**Why amount-only decomposition gets ambiguous at scale.** The candidate pool for a credit is every unmatched settlement paid in the window before it, so it grows with daily volume. Once a pool holds a few dozen settlements of lakh-scale amounts, the number of possible subsets (2ⁿ) exceeds the number of distinct paise totals, and other subsets genuinely sum to the same figure. No algorithm can recover what the amounts don't determine. CloseLoop auto-matches only proven-unique subsets, or a unique contiguous run under a stated payout-model assumption, and sends everything else to a human with ranked candidate sets. Production systems avoid this by reading the gateway's payout/settlement reports, which list the settlement ids inside each payout; that connector is a known limitation here.",
+    "**Why amount-only decomposition gets ambiguous at scale.** The candidate pool for a credit is every unmatched settlement paid in the window before it, so it grows with daily volume. Once a pool holds a few dozen settlements of lakh-scale amounts, the number of possible subsets (2ⁿ) exceeds the number of distinct paise totals, and other subsets genuinely sum to the same figure. No algorithm can recover what the amounts don't determine. CloseLoop auto-matches only proven-unique subsets, or a unique contiguous run under a stated payout-model assumption, and sends everything else to a human with ranked candidate sets. The way out is the gateway's own recon report, which lists the settlements inside each payout: see the next section.",
+    "",
+  );
+
+  const G = gatewayComparison(r);
+  const A = G.amount_only;
+  const W = G.with_report;
+  out.push(
+    "## Gateway recon report vs amount-only (held-out)",
+    "",
+    `The same held-out data reconciled twice per seed: once on amounts alone, once after importing a Razorpay settlement recon report (documented \`recon/combined\` format) generated from the same synthetic data. The report gives each settlement's \`settlement_utr\`, so a batched credit is matched from item-level rows (\`BATCH_FROM_GATEWAY_REPORT\`), still checked to the paisa against the bank. Scored from truth links only, so both modes are judged identically. Pooled over ${r.seedsUsed.length} seeds.`,
+    "",
+    table(
+      ["Metric", "Amount-only", "With gateway report"],
+      [
+        ["Batched bank credits matched to exactly the right settlements", rate(A.batch.correct, A.batch.n), rate(W.batch.correct, W.batch.n)],
+        ["… sent to a human as ambiguous (AMBIGUOUS_BATCH)", rate(A.batch.ambiguous, A.batch.n), rate(W.batch.ambiguous, W.batch.n)],
+        ["… blocked by a match conflict", rate(A.batch.conflict, A.batch.n), rate(W.batch.conflict, W.batch.n)],
+        ["… matched to the wrong set", rate(A.batch.wrong, A.batch.n), rate(W.batch.wrong, W.batch.n)],
+        ["… held for a report-vs-bank mismatch", rate(A.batch.report_mismatch, A.batch.n), rate(W.batch.report_mismatch, W.batch.n)],
+        ["All bank credits linked to exactly the right settlements", rate(A.credits.correct, A.credits.truth_linked), rate(W.credits.correct, W.credits.truth_linked)],
+        ["Wrong links", A.credits.wrong_links, W.credits.wrong_links],
+        ["Settlements waiting on a batch decision (`unresolved_in_batch`)", A.unresolved_in_batch, W.unresolved_in_batch],
+        ["Settlements never credited, flagged MISSING_BANK_CREDIT", rate(A.never_credited.detected, A.never_credited.n), rate(W.never_credited.detected, W.never_credited.n)],
+        ["Look-alike decoy credits wrongly suggested for a settlement", rate(A.decoys.suggested, A.decoys.n), rate(W.decoys.suggested, W.decoys.n)],
+        ["Human review items on bank credits (ambiguous + conflict + suggested + report mismatch)", queueSize(A), queueSize(W)],
+        ["GATEWAY_REPORT_MISMATCH raised", A.queue.gateway_report_mismatch, W.queue.gateway_report_mismatch],
+      ],
+    ),
+    "",
+    "The synthetic report is generated from the same data as the bank statement, so it never disagrees with the bank: this measures what item-level links buy, not how the engine handles a faulty report. Disagreements (bank credit off by a paisa, report rows not adding up to a settlement, a settlement the bank paid separately) are covered by unit tests and raise GATEWAY_REPORT_MISMATCH without matching.",
     "",
   );
 
@@ -266,12 +319,16 @@ export function renderEvalMarkdown(r: EvalResult, meta: ReportMeta): string {
   return out.join("\n");
 }
 
-/** The three-line Results block for the README, built from the same run. */
+/** The Results block for the README, built from the same run. */
 export function renderReadmeResults(r: EvalResult): string {
   const H = headline(r, "heldout");
   return [
     `- **Held-out** (${r.seedsUsed.length} seeds × ${r.options.payments.toLocaleString("en-IN")} payments, unseen noise variants included): ${pct(...H.credits)} of bank credits linked to exactly the right settlements (n=${H.credits[1]}), ${H.wrongLinks} wrong link${H.wrongLinks === 1 ? "" : "s"}; corrupted UTRs recovered ${pct(...H.fuzzy)} (n=${H.fuzzy[1]}), counting correct suggestions a human still confirms.`,
     `- **Batch credits:** ${pct(...H.batch)} decomposed correctly (contiguous ${pct(...H.batchContiguous)}, non-contiguous ${pct(...H.batchNonContiguous)}), ${pct(...H.batchAmbiguous)} sent to a human as ambiguous; missing bank credits ${H.missing.detected} detected / ${H.missing.deferred} deferred / ${H.missing.missed} missed.`,
-    `- **Exceptions:** macro recall ${pct(H.macroRecall, 1)}, precision ${pct(H.macroPrecision, 1)} across ${EXCEPTION_TYPES.length} types; ${Math.round(H.recordsPerSecond).toLocaleString("en-IN")} records/s; full eval ${(r.totalMs / 1000).toFixed(1)} s. Details in [EVAL.md](EVAL.md).`,
+    (() => {
+      const { amount_only: A, with_report: W } = gatewayComparison(r);
+      return `- **With Razorpay's settlement recon report** (same held-out data): batched credits matched exactly right ${pct(W.batch.correct, W.batch.n)} vs ${pct(A.batch.correct, A.batch.n)} amount-only (n=${W.batch.n}); ambiguous ${A.batch.ambiguous} → ${W.batch.ambiguous}, match conflicts ${A.batch.conflict} → ${W.batch.conflict}, human review items ${queueSize(A)} → ${queueSize(W)}.`;
+    })(),
+    `- **Exceptions:** macro recall ${pct(H.macroRecall, 1)}, precision ${pct(H.macroPrecision, 1)} across ${H.typesScored} types; ${Math.round(H.recordsPerSecond).toLocaleString("en-IN")} records/s; full eval ${(r.totalMs / 1000).toFixed(1)} s. Details in [EVAL.md](EVAL.md).`,
   ].join("\n");
 }

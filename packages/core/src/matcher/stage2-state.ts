@@ -11,6 +11,9 @@ export interface BankState {
   resolvedCredits: Set<string>;
   /** Bank line id → settlement ids suggested for it (pending human approval). */
   suggestions: Map<string, string[]>;
+  /** Credits and settlements under a GATEWAY_REPORT_MISMATCH: no later stage may match them; a human decides. */
+  heldCredits: Set<string>;
+  heldSettlements: Set<string>;
 }
 
 export function newBankState(credits: BankLine[], settlements: Settlement[]): BankState {
@@ -20,6 +23,8 @@ export function newBankState(credits: BankLine[], settlements: Settlement[]): Ba
     linked: new Map(),
     resolvedCredits: new Set(),
     suggestions: new Map(),
+    heldCredits: new Set(),
+    heldSettlements: new Set(),
   };
 }
 

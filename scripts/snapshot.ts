@@ -6,14 +6,18 @@
  * apps/dashboard/data/snapshot.json for the read-only dashboard. LLM explanations (from .env) are generated
  * only for the DEMO.md cases and the top exceptions by amount; everything else gets the deterministic
  * explanation, and every explanation is labelled with its source. No secrets are written.
+ * It also records the same demo month with a SYNTHETIC gateway recon report imported (gateway_report), for the
+ * "Gateway report vs amount-only" comparison and the report-mode batch decompositions.
  */
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { loadConfig, loadEnvFile, providerFromEnv, showcaseCases, type Db } from "@closeloop/core";
+import { buildSyntheticReconReport, generateDataset, loadConfig, loadEnvFile, providerFromEnv, showcaseCases, type Db } from "@closeloop/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { openDatabase } from "closeloop-mcp/src/bootstrap.ts";
+import { DEMO_SEED, openDatabase } from "closeloop-mcp/src/bootstrap.ts";
 import { ConfirmationStore } from "closeloop-mcp/src/confirm.ts";
 import { createCloseLoopServer } from "closeloop-mcp/src/server.ts";
 
@@ -80,6 +84,49 @@ function repoUrl(): string | null {
 }
 
 const started = Date.now();
+const readEval = (): unknown => (existsSync("EVAL.json") ? JSON.parse(readFileSync("EVAL.json", "utf8")) : null);
+
+/**
+ * The same demo data reconciled twice in a fresh DB, through the real MCP tools: amount-only, then after
+ * import_razorpay_recon with a SYNTHETIC recon report built from the demo dataset. Counts cover every open item
+ * as of the end date (not just October), so a still-open September ambiguity counts too.
+ */
+async function gatewaySection(lines: readonly string[]): Promise<Structured> {
+  const { db: gdb } = openDatabase(":memory:", cfg);
+  const client = await connect(gdb, false);
+  const tally = (runId: string) => {
+    const count = (type: string) => (gdb.prepare("SELECT COUNT(*) AS n FROM exceptions WHERE run_id = ? AND type = ?").get(runId, type) as { n: number }).n;
+    const credits = (kind: string) => (gdb.prepare("SELECT COUNT(DISTINCT right_id) AS n FROM matches WHERE run_id = ? AND kind = ?").get(runId, kind) as { n: number }).n;
+    return {
+      batch_credits: { contiguous: credits("BATCH_CONTIGUOUS"), subset: credits("BATCH"), gateway_report: credits("BATCH_FROM_GATEWAY_REPORT") },
+      ambiguous_batch: count("AMBIGUOUS_BATCH"),
+      match_conflict: count("MATCH_CONFLICT"),
+      suggested_match: count("SUGGESTED_MATCH"),
+      gateway_report_mismatch: count("GATEWAY_REPORT_MISMATCH"),
+      unidentified_bank_credit: count("UNIDENTIFIED_BANK_CREDIT"),
+      missing_bank_credit: count("MISSING_BANK_CREDIT"),
+      unresolved_in_batch: (gdb.prepare("SELECT COUNT(DISTINCT settlement_id) AS n FROM settlement_reviews WHERE run_id = ?").get(runId) as { n: number }).n,
+    };
+  };
+  const amountOnly = await call(client, "run_reconciliation", { from: FROM, to: TO });
+  const file = join(mkdtempSync(join(tmpdir(), "closeloop-snapshot-")), "recon.synthetic.json");
+  writeFileSync(file, JSON.stringify(buildSyntheticReconReport(generateDataset({ seed: DEMO_SEED, config: cfg }))));
+  const imported = await call(client, "import_razorpay_recon", { file_path: file });
+  if (imported.synthetic !== true) throw new Error("demo recon report is not labelled synthetic");
+  const withReport = await call(client, "run_reconciliation", { from: FROM, to: TO });
+  const reportLines = (gdb.prepare("SELECT DISTINCT right_id FROM matches WHERE run_id = ? AND kind = 'BATCH_FROM_GATEWAY_REPORT' AND anchor_date BETWEEN ? AND ? ORDER BY right_id").all(withReport.run_id, FROM, TO) as { right_id: string }[]).map((r) => r.right_id);
+  const batches: Structured[] = [];
+  for (const line of [...new Set([...lines, ...reportLines])]) batches.push(await call(client, "decompose_bank_credit", { bank_line_id: line }));
+  return {
+    synthetic: true,
+    note: "SYNTHETIC recon report generated from the demo dataset in the gateway's documented settlement recon format; it agrees with the bank by construction.",
+    as_of: TO,
+    import: { rows: imported.rows_read, settlements_covered: imported.settlements_covered, payout_utrs: imported.payout_utrs },
+    amount_only: tally(String(amountOnly.run_id)),
+    with_report: tally(String(withReport.run_id)),
+    batches,
+  };
+}
 
 /**
  * --refresh-batches: re-run the deterministic engine and re-record only the batch decompositions, keeping the
@@ -116,10 +163,11 @@ if (values["refresh-batches"]) {
   } catch {
     /* not a git checkout */
   }
-  const out = redact(JSON.stringify({ ...existing, batches: refreshed, batches_refreshed_at: new Date().toISOString(), batches_refreshed_from_commit: sha }));
+  const gateway_report = await gatewaySection(refreshed.map((b) => String((b.bank_line as Structured).id)));
+  const out = redact(JSON.stringify({ ...existing, batches: refreshed, gateway_report, eval: readEval() ?? existing.eval, batches_refreshed_at: new Date().toISOString(), batches_refreshed_from_commit: sha }));
   if (/razorpay|\brzpy?\b/i.test(out) || /gsk_|sk-[A-Za-z0-9]{10}|LLM_API_KEY|Bearer /.test(out)) throw new Error("Refusing to write: real gateway name or secret-like text");
   writeFileSync(OUT, out + "\n");
-  log(`refreshed ${refreshed.length} batch decompositions in ${OUT}; explanations untouched`);
+  log(`refreshed ${refreshed.length} batch decompositions, the gateway-report comparison and the eval headline in ${OUT}; explanations untouched`);
   process.exit(0);
 }
 const { db } = openDatabase(":memory:", cfg);
@@ -193,8 +241,8 @@ const batchLines = new Set<string>([
 const batches: Structured[] = [];
 for (const line of batchLines) batches.push(await call(plainClient, "decompose_bank_credit", { bank_line_id: line }));
 
-const evalPath = "EVAL.json";
-const evalJson: unknown = existsSync(evalPath) ? JSON.parse(readFileSync(evalPath, "utf8")) : null;
+const evalJson = readEval();
+const gateway_report = await gatewaySection([...batchLines]);
 let commit: string | null = null;
 try {
   const sha = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
@@ -226,6 +274,7 @@ const snapshot = {
   showcase,
   batches,
   default_batch_line: showcase.largestContiguousBatch?.bank_line_id ?? null,
+  gateway_report,
   eval: evalJson,
 };
 

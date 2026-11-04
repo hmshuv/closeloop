@@ -18,6 +18,7 @@ export const RunOutput = z.object({
     bank_credits_fuzzy_utr: z.number().int(),
     bank_credits_batch_contiguous: z.number().int(),
     bank_credits_batch_subset: z.number().int(),
+    bank_credits_batch_gateway_report: z.number().int(),
     settlements_inside_batch_credits: z.number().int(),
     ledger_receipts_by_reference: z.number().int(),
     ledger_receipts_by_attributes: z.number().int(),
@@ -32,6 +33,8 @@ export const RunOutput = z.object({
   pending: z.object({ payments_in_settlement_window: z.number().int(), receipts_in_booking_grace: z.number().int(), settlements_unresolved_in_batch: z.number().int() }),
   tie_out: z.object({ bank_credits: Money, book_receipts: Money, difference: Money, explained_by_reconciling_items: Money, unexplained_residual: Money }),
   batch_search: z.record(z.string(), z.number()),
+  /** Null when no gateway recon report was imported: batches were matched on amounts alone. */
+  gateway_report: z.record(z.string(), z.number()).nullable(),
   ai: z.string(),
 });
 
@@ -110,7 +113,7 @@ export const DecomposeOutput = z.object({
   ...base,
   run_id: z.string(),
   bank_line: z.object({ id: z.string(), txn_date: z.string(), narration: z.string(), credit: Money }),
-  status: z.enum(["decomposed", "matched_single_settlement", "human_approved", "ambiguous", "conflict", "suggested", "unidentified"]),
+  status: z.enum(["decomposed", "matched_single_settlement", "human_approved", "ambiguous", "conflict", "report_mismatch", "suggested", "unidentified"]),
   match_kind: z.string().nullable(),
   assumption: z.string().nullable(),
   /**
@@ -124,6 +127,25 @@ export const DecomposeOutput = z.object({
   candidate_sets: z.array(CandidateSet.extend({ settlements: z.array(SettlementLine) })),
   exception_id: z.string().nullable(),
   note: z.string(),
+});
+
+export const ImportReconOutput = z.object({
+  ...base,
+  report_id: z.string(),
+  source: z.enum(["api", "file"]),
+  origin: z.string(),
+  synthetic: z.boolean(),
+  rows_read: z.number().int(),
+  inserted: z.number().int(),
+  duplicates: z.number().int(),
+  conflict_count: z.number().int(),
+  conflicts: z.array(z.string()),
+  unsettled: z.number().int(),
+  settlements_covered: z.number().int(),
+  payout_utrs: z.number().int(),
+  settled_from: z.string().nullable(),
+  settled_to: z.string().nullable(),
+  settlements_fetched: z.number().int(),
 });
 
 const JournalLineOut = z.object({ account: z.string(), debit: Money, credit: Money, memo: z.string() });

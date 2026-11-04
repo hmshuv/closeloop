@@ -1,4 +1,5 @@
 import type { Db } from "../db/open.ts";
+import { loadGatewayReport } from "../gateway/store.ts";
 import {
   BankLineSchema,
   LedgerEntrySchema,
@@ -22,6 +23,7 @@ export function loadSource(db: Db, asOf: string): SourceData {
     items: rows(
       "SELECT i.* FROM settlement_items i JOIN settlements s ON s.id = i.settlement_id WHERE s.settled_at <= ? ORDER BY i.id",
     ).map((r) => SettlementItemSchema.parse(r)),
+    gatewayReport: loadGatewayReport(db, asOf),
     bankLines: rows("SELECT * FROM bank_lines WHERE txn_date <= ? ORDER BY txn_date, id").map((r) => BankLineSchema.parse(r)),
     ledger: rows("SELECT * FROM ledger_entries WHERE entry_date <= ? ORDER BY entry_date, id").map((r) => LedgerEntrySchema.parse(r)),
     asOf,

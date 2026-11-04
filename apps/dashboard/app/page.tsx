@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GatewayComparison } from "@/components/gateway-comparison";
 import { Badge, Card, ClassBadge, PageTitle, Stat } from "@/components/ui";
 import { CLASS_HINT, CLASS_LABEL, dateLabel, pct, TYPE_LABEL } from "@/lib/format";
 import { snapshot } from "@/lib/snapshot";
@@ -37,7 +38,7 @@ export default function Overview() {
               ["Credits linked to the right settlements", pct(ev.heldout.credits), `n=${ev.heldout.credits[1]} · ${ev.heldout.wrongLinks} wrong`],
               ["Batch credits decomposed correctly", pct(ev.heldout.batch), `${pct(ev.heldout.batchAmbiguous)} sent to a human`],
               ["Corrupted UTRs recovered", pct(ev.heldout.fuzzy), "incl. correct suggestions"],
-              ["Exception recall / precision", `${(ev.heldout.macroRecall * 100).toFixed(1)}% / ${(ev.heldout.macroPrecision * 100).toFixed(1)}%`, "macro, 13 types"],
+              ["Exception recall / precision", `${(ev.heldout.macroRecall * 100).toFixed(1)}% / ${(ev.heldout.macroPrecision * 100).toFixed(1)}%`, `macro, ${ev.heldout.typesScored ?? 13} types`],
             ].map(([k, v, sub]) => (
               <div key={k}>
                 <dt className="text-xs text-emerald-900/70 dark:text-emerald-200/70">{k}</dt>
@@ -48,6 +49,8 @@ export default function Overview() {
           </dl>
         </section>
       )}
+
+      <GatewayComparison />
 
       <h2 className="mb-2 text-sm font-semibold">Bank credits matched, by kind</h2>
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">

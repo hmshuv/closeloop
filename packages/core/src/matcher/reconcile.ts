@@ -3,6 +3,7 @@ import { exposureClassOf } from "./exposure.ts";
 import { stage1Items } from "./stage1-items.ts";
 import { stage2Bank, type DeferredSettlement, type Stage2Options } from "./stage2-bank.ts";
 import type { BatchStats } from "./stage2-batch.ts";
+import type { GatewayReportStats } from "./stage2-report.ts";
 import { stage3Ledger } from "./stage3-ledger.ts";
 import { stage4Timing } from "./stage4-timing.ts";
 import { computeTieOut, tieOutExceptions, type TieOut } from "./tieout.ts";
@@ -18,6 +19,8 @@ export interface ReconResult {
   deferred: DeferredSettlement[];
   tieOut: TieOut;
   batch: BatchStats;
+  /** Null when no gateway recon report was imported. */
+  gateway: GatewayReportStats | null;
   durationMs: number;
 }
 
@@ -43,6 +46,7 @@ export function reconcile(src: SourceData, cfg: CloseLoopConfig, period: { from:
     deferred: s2.deferred,
     tieOut,
     batch: s2.batch,
+    gateway: s2.gateway,
     durationMs: performance.now() - started,
   };
 }

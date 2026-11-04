@@ -46,7 +46,19 @@ const zeroFuzzy = () => Object.fromEntries(FUZZY_OUTCOMES.map((o) => [o, 0])) as
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
 const detail = (l: TruthLabel, key: string) => l.details[key];
 
-const LINK_KINDS = new Set(["EXACT", "FUZZY", "BATCH", "BATCH_CONTIGUOUS"]);
+const LINK_KINDS = new Set(["EXACT", "FUZZY", "BATCH", "BATCH_CONTIGUOUS", "BATCH_FROM_GATEWAY_REPORT"]);
+
+/** What the engine linked each bank credit to (confirmed links only; suggestions are not links). */
+function predictedLinks(result: ReconResult): Map<string, { kind: string; settlements: string[] }> {
+  const predicted = new Map<string, { kind: string; settlements: string[] }>();
+  for (const m of result.matches) {
+    if (!LINK_KINDS.has(m.kind) || m.left.type !== "settlement" || m.right.type !== "bank_line") continue;
+    const p = predicted.get(m.right.id) ?? { kind: m.kind, settlements: [] };
+    p.settlements.push(m.left.id);
+    predicted.set(m.right.id, p);
+  }
+  return predicted;
+}
 
 /**
  * Score one reconciled split against its ground truth. Definitions are spelled out in EVAL.md.
@@ -55,14 +67,7 @@ const LINK_KINDS = new Set(["EXACT", "FUZZY", "BATCH", "BATCH_CONTIGUOUS"]);
 export function scoreSplit(input: { seed: number; split: Split; labels: TruthLabel[]; links: TruthLink[]; result: ReconResult; records: number }): SplitScore {
   const { labels, links, result } = input;
 
-  // What the engine linked each bank credit to (confirmed links only; suggestions are not links).
-  const predicted = new Map<string, { kind: string; settlements: string[] }>();
-  for (const m of result.matches) {
-    if (!LINK_KINDS.has(m.kind) || m.left.type !== "settlement" || m.right.type !== "bank_line") continue;
-    const p = predicted.get(m.right.id) ?? { kind: m.kind, settlements: [] };
-    p.settlements.push(m.left.id);
-    predicted.set(m.right.id, p);
-  }
+  const predicted = predictedLinks(result);
   const truthOf = new Map(links.filter((l) => l.kind === "BANK_SETTLEMENT").map((l) => [l.from_id, l.to_ids]));
   const exceptionsOn = new Map<string, typeof result.exceptions>();
   for (const e of result.exceptions) exceptionsOn.set(e.primary.id, [...(exceptionsOn.get(e.primary.id) ?? []), e]);
@@ -151,7 +156,8 @@ export function scoreSplit(input: { seed: number; split: Split; labels: TruthLab
     const p = predicted.get(l.entity_id);
     const types = typesOn(l.entity_id);
     let outcome: BatchOutcome;
-    if (p && (p.kind === "BATCH" || p.kind === "BATCH_CONTIGUOUS")) outcome = sameSet(p.settlements, truth) ? (p.kind === "BATCH_CONTIGUOUS" ? "correct_contiguous" : "correct_subset") : "wrong_set";
+    // A report-mode link counts with the proven subsets here; the mode comparison (scoreMode) reports it separately.
+    if (p && (p.kind === "BATCH" || p.kind === "BATCH_CONTIGUOUS" || p.kind === "BATCH_FROM_GATEWAY_REPORT")) outcome = sameSet(p.settlements, truth) ? (p.kind === "BATCH_CONTIGUOUS" ? "correct_contiguous" : "correct_subset") : "wrong_set";
     else if (p) outcome = "other";
     else if (types.includes("AMBIGUOUS_BATCH")) outcome = "ambiguous";
     else if (types.includes("MATCH_CONFLICT")) outcome = "conflict";
@@ -208,4 +214,78 @@ export function scoreSplit(input: { seed: number; split: Split; labels: TruthLab
     exposure: summarizeExposure(result.exceptions),
     misses,
   };
+}
+
+/**
+ * Outcomes that mean the same thing with or without a gateway recon report, scored from truth links only, so
+ * amount-only matching and report matching can be compared on identical data. (The exception labels assume
+ * amount-only matching, e.g. that an ambiguity trap should be AMBIGUOUS_BATCH, so they are not used here.)
+ */
+export interface ModeScore {
+  credits: { truth_linked: number; correct: number; wrong_links: number };
+  /** Bank credits that truly carry two or more settlements (every consolidated payout, traps included). */
+  batch: { n: number; correct: number; wrong: number; ambiguous: number; conflict: number; report_mismatch: number; unresolved: number };
+  /** Open human work raised on bank credits. */
+  queue: { ambiguous_batch: number; match_conflict: number; suggested_match: number; gateway_report_mismatch: number };
+  unresolved_in_batch: number;
+  /** Settlements whose bank credit never arrived (MISSING_BANK_LINE, and the twin of an ambiguity trap). */
+  never_credited: { n: number; detected: number; deferred: number; missed: number };
+  /** Stray credits whose UTR resembles a settlement that was really paid inside a payout. Right answer: unidentified. */
+  decoys: { n: number; suggested: number; unidentified: number };
+}
+
+export function scoreMode(input: { labels: TruthLabel[]; links: TruthLink[]; result: ReconResult }): ModeScore {
+  const { labels, links, result } = input;
+  const predicted = predictedLinks(result);
+  const typesOn = new Map<string, string[]>();
+  for (const e of result.exceptions) typesOn.set(e.primary.id, [...(typesOn.get(e.primary.id) ?? []), e.type]);
+  const has = (id: string, type: string) => (typesOn.get(id) ?? []).includes(type);
+
+  const out: ModeScore = {
+    credits: { truth_linked: 0, correct: 0, wrong_links: 0 },
+    batch: { n: 0, correct: 0, wrong: 0, ambiguous: 0, conflict: 0, report_mismatch: 0, unresolved: 0 },
+    queue: { ambiguous_batch: 0, match_conflict: 0, suggested_match: 0, gateway_report_mismatch: 0 },
+    unresolved_in_batch: result.deferred.length,
+    never_credited: { n: 0, detected: 0, deferred: 0, missed: 0 },
+    decoys: { n: 0, suggested: 0, unidentified: 0 },
+  };
+  for (const link of links.filter((l) => l.kind === "BANK_SETTLEMENT")) {
+    const p = predicted.get(link.from_id);
+    if (link.to_ids.length === 0) {
+      if (p) out.credits.wrong_links++;
+      continue;
+    }
+    out.credits.truth_linked++;
+    const right = Boolean(p && sameSet(p.settlements, link.to_ids));
+    if (right) out.credits.correct++;
+    else if (p) out.credits.wrong_links++;
+    if (link.to_ids.length < 2) continue;
+    out.batch.n++;
+    if (right) out.batch.correct++;
+    else if (p) out.batch.wrong++;
+    else if (has(link.from_id, "AMBIGUOUS_BATCH")) out.batch.ambiguous++;
+    else if (has(link.from_id, "MATCH_CONFLICT")) out.batch.conflict++;
+    else if (has(link.from_id, "GATEWAY_REPORT_MISMATCH")) out.batch.report_mismatch++;
+    else out.batch.unresolved++;
+  }
+  for (const e of result.exceptions) {
+    if (e.primary.type !== "bank_line") continue;
+    if (e.type === "AMBIGUOUS_BATCH") out.queue.ambiguous_batch++;
+    if (e.type === "MATCH_CONFLICT") out.queue.match_conflict++;
+    if (e.type === "SUGGESTED_MATCH") out.queue.suggested_match++;
+    if (e.type === "GATEWAY_REPORT_MISMATCH") out.queue.gateway_report_mismatch++;
+  }
+  const deferred = new Set(result.deferred.map((d) => d.settlement_id));
+  for (const l of labels.filter((x) => x.noise_kind === "MISSING_BANK_LINE" || x.noise_kind === "AMBIGUOUS_TWIN")) {
+    out.never_credited.n++;
+    if (has(l.entity_id, "MISSING_BANK_CREDIT")) out.never_credited.detected++;
+    else if (deferred.has(l.entity_id)) out.never_credited.deferred++;
+    else out.never_credited.missed++;
+  }
+  for (const l of labels.filter((x) => x.noise_kind === "CONFLICT_DECOY")) {
+    out.decoys.n++;
+    if (has(l.entity_id, "SUGGESTED_MATCH")) out.decoys.suggested++;
+    else if (has(l.entity_id, "UNIDENTIFIED_BANK_CREDIT")) out.decoys.unidentified++;
+  }
+  return out;
 }

@@ -10,7 +10,7 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { loadConfig } from "@closeloop/core";
-import { headline, renderEvalMarkdown, renderReadmeResults, runEval } from "@closeloop/core/eval";
+import { gatewayComparison, headline, renderEvalMarkdown, renderReadmeResults, runEval } from "@closeloop/core/eval";
 
 const cfg = loadConfig();
 const g = cfg.generator;
@@ -47,6 +47,12 @@ console.table({
   dev: { credits_correct: p(...D.credits), wrong_links: D.wrongLinks, fuzzy_recovered: p(...D.fuzzy), batch_correct: p(...D.batch), batch_ambiguous: p(...D.batchAmbiguous), macro_recall: p(D.macroRecall, 1), macro_precision: p(D.macroPrecision, 1) },
   heldout: { credits_correct: p(...H.credits), wrong_links: H.wrongLinks, fuzzy_recovered: p(...H.fuzzy), batch_correct: p(...H.batch), batch_ambiguous: p(...H.batchAmbiguous), macro_recall: p(H.macroRecall, 1), macro_precision: p(H.macroPrecision, 1) },
 });
+const G = gatewayComparison(result);
+console.log("Held-out, amount-only vs with gateway recon report:");
+console.table({
+  amount_only: { batch_correct: p(G.amount_only.batch.correct, G.amount_only.batch.n), ambiguous: G.amount_only.batch.ambiguous, conflicts: G.amount_only.batch.conflict, wrong_links: G.amount_only.credits.wrong_links, unresolved_in_batch: G.amount_only.unresolved_in_batch },
+  with_report: { batch_correct: p(G.with_report.batch.correct, G.with_report.batch.n), ambiguous: G.with_report.batch.ambiguous, conflicts: G.with_report.batch.conflict, wrong_links: G.with_report.credits.wrong_links, unresolved_in_batch: G.with_report.unresolved_in_batch },
+});
 if (result.shortfall.length) console.log(`Held-out coverage below ${minPerType}: ${result.shortfall.map((c) => `${c.target}=${c.count}`).join(", ")}`);
 
 if (write) {
@@ -74,6 +80,7 @@ if (write) {
     coverage_met: result.shortfall.length === 0,
     dev: D,
     heldout: H,
+    gateway_report_vs_amount_only: { split: "heldout", ...G },
     batch_by_volume: result.sweep.map((s) => ({ payments: s.payments, payments_per_day: s.payments_per_day, max_pool: s.max_pool, outcomes: s.score.batch })),
   };
   writeFileSync("EVAL.json", JSON.stringify(evalJson, null, 2) + "\n");
