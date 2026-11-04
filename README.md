@@ -12,7 +12,20 @@
 
 ## Why this exists
 
-> **[PLACEHOLDER — the author will write this section.]**
+Month-end close at an Indian business that takes payments online comes down to one question: did every rupee a customer paid reach the bank, and is it in the books? Answering it means matching three records that were never designed to agree:
+
+- **The gateway** settles captured payments T+1 or T+2 depending on the method. It deducts its fee and 18% GST on that fee, and nets refunds against the same settlement.
+- **The bank statement** often shows one credit for many settlements paid out together. Its narration may carry a UTR that is truncated, split across tokens or reformatted.
+- **The ledger** (Tally or Zoho style) has receipts booked by hand, sometimes with a wrong or missing reference, sometimes twice.
+
+Most of this gets done in spreadsheets. Exact matches are easy. The rest is where the days go: a single credit that hides fifteen settlements, a UTR with one wrong character, a payment still inside its settlement window that looks missing but isn't.
+
+An LLM can read a messy narration, but it shouldn't be the one deciding that ₹12,33,701.15 is made up of exactly these fifteen settlements. CloseLoop splits the work:
+
+- **Deterministic code** does every match, sum and verdict. It matches a batch credit only when exactly one run of consecutive settlements, or failing that exactly one set out of all of them, adds up to it. When the amounts allow more than one answer, it says so and hands the decision to a person.
+- **The AI layer** only reads evidence: it explains exceptions and drafts journal entries, and every claim must cite records the engine produced. It can't change data, and the system works fully without it.
+
+It runs as an MCP server, so a finance team can ask "what's unreconciled in October, and why?" in Claude and get an answer whose numbers come from code they can audit.
 
 ## Architecture
 
