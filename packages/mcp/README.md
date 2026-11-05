@@ -5,6 +5,7 @@ MCP server for month-end reconciliation of Razorpay-style gateway settlements ag
 ```bash
 npx -y closeloop-mcp          # stdio MCP server; seeds a demo dataset on first run
 npx -y closeloop-mcp check    # run one reconciliation and print the summary
+npx -y closeloop-mcp reset    # delete the demo state (incl. imported recon reports); next start re-seeds
 ```
 
 Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`):

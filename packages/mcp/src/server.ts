@@ -2,6 +2,7 @@ import {
   addDays,
   approveBatchCandidate,
   approveSuggestion,
+  CLOSELOOP_VERSION,
   CONTIGUITY_ASSUMPTION,
   datasetMeta,
   draftJournalEntry,
@@ -159,7 +160,7 @@ interface SettlementRow {
 
 export function createCloseLoopServer(ctx: ServerContext): McpServer {
   const { db } = ctx;
-  const server = new McpServer({ name: "closeloop", version: "0.2.0" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "closeloop", version: CLOSELOOP_VERSION }, { instructions: INSTRUCTIONS });
   const settlementsById = (ids: string[]) => {
     const get = db.prepare("SELECT id, utr, settled_at, created_at, amount_paise FROM settlements WHERE id = ?");
     return ids.map((id) => get.get(id) as SettlementRow | undefined).filter((s): s is SettlementRow => Boolean(s));

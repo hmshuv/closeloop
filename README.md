@@ -147,7 +147,9 @@ CI runs a 5k-payment smoke version on every push.
 | `get_audit_trail({entity_id?, limit?, cursor?})` | Append-only audit events, paginated | read-only |
 | `import_razorpay_recon({file_path?} \| {from, to})` | Load Razorpay's settlement recon report from a JSON/CSV export, or fetch it read-only from the API | writes gateway report rows (insert-only) |
 
-Also: resource `closeloop://summary/latest` and prompt `month_end_review({month?})`. Every amount comes as raw `amount_paise` plus a pre-formatted `amount_inr` (₹12,33,701.15), and every response starts with a one-line summary, so the model never does arithmetic. On first run with an empty database the server seeds the reproducible demo dataset into `~/.closeloop/closeloop.db` (override with `CLOSELOOP_DB`). Subcommands: `closeloop-mcp check` (one reconciliation, summary to stderr) `closeloop-mcp seed PATH` (write the demo data as a standalone source DB) and `closeloop-mcp demo-report PATH` (write a synthetic Razorpay recon report for the demo data, `.json` or `.csv`).
+Also: resource `closeloop://summary/latest` and prompt `month_end_review({month?})`. Every amount comes as raw `amount_paise` plus a pre-formatted `amount_inr` (₹12,33,701.15), and every response starts with a one-line summary, so the model never does arithmetic. On first run with an empty database the server seeds the reproducible demo dataset into `~/.closeloop/closeloop.db` (override with `CLOSELOOP_DB`). Subcommands: `closeloop-mcp check` (one reconciliation, summary to stderr) `closeloop-mcp seed PATH` (write the demo data as a standalone source DB), `closeloop-mcp demo-report PATH` (write a synthetic Razorpay recon report for the demo data, `.json` or `.csv`) and `closeloop-mcp reset` (delete the demo state, imported recon reports included, and print what was removed).
+
+**Where state lives.** All state is in one SQLite file: `CLOSELOOP_DB`, or by default `~/.closeloop/closeloop.db`, with `truth.db` beside it for the eval's ground truth. Imported recon reports, runs, exceptions, approvals and the audit trail all live in it. Nothing is kept in the npx package folder or the config directory. At startup the server logs the resolved paths to stderr: the state DB and where that path came from, the source DB, the config directory, the `.env` files it read, and whether a gateway report is imported. In Claude Desktop that output is in `~/Library/Logs/Claude/mcp-server-closeloop.log`. Claude Desktop runs the server as two processes on the same file, so quit it before `reset`; `reset` warns if any process still has the state open.
 
 **MCP Inspector:**
 
@@ -212,7 +214,7 @@ For the local server's other options, see the Configuration section of their REA
 2. Ask Claude to import that file.
 3. Ask about bnk_000236 again: it is now matched from the report.
 
-Every row of the synthetic report says it is synthetic in `notes`. On held-out data the eval measures what the report changes (see the Results line above and [EVAL.md](EVAL.md)).
+Every row of the synthetic report says it is synthetic in `notes`. To run the demo again from the amount-only start, quit Claude Desktop, run `npx -y closeloop-mcp reset`, and reopen it. On held-out data the eval measures what the report changes (see the Results line above and [EVAL.md](EVAL.md)).
 
 ## LLM setup (optional)
 

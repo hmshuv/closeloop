@@ -4,8 +4,8 @@
 //   node scripts/pack-smoke.mjs --pack-only DIR  only pack (after the file-list check) into DIR
 //   node scripts/pack-smoke.mjs --tarball FILE   only install + run an existing tarball
 // Requires `pnpm build` first when packing.
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,6 +93,11 @@ async function installAndRun(tarball) {
   child.kill();
 
   for (const l of lines()) if (JSON.parse(l).jsonrpc !== "2.0") fail(`non-JSON-RPC line on stdout: ${l}`);
+  if (!/state db {3}\S*state\.db \(from CLOSELOOP_DB\)/.test(stderr)) fail("startup did not log the resolved state DB path");
+  await new Promise((r) => child.once("exit", r));
+  const reset = spawnSync(npx, ["--no-install", "closeloop-mcp", "reset"], { cwd: app, env: runEnv, encoding: "utf8" });
+  if (reset.status !== 0 || existsSync(join(app, "state.db")) || !reset.stderr.includes("removed:")) fail(`reset did not remove the state DB:\n${reset.stderr}`);
+  console.log("pack-smoke: reset removed the state DB (incl. the imported recon report)");
   if (tools.result?.tools?.length !== 10) fail(`expected 10 tools, got ${tools.result?.tools?.length}`);
   if (call.result?.isError) fail(`tool call failed: ${call.result.content?.[0]?.text}`);
   if (before?.status !== "conflict") fail(`bnk_000236 should start as a match conflict (amount-only), got ${before?.status}`);

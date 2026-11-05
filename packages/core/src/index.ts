@@ -1,4 +1,4 @@
-export const CLOSELOOP_VERSION = "0.2.0";
+export const CLOSELOOP_VERSION = "0.2.1";
 
 export * from "./money.ts";
 export * from "./calendar.ts";
